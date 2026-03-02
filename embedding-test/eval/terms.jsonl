@@ -1,0 +1,50 @@
+{"id": "term_001", "query": "出租人能否单方面提高房租？", "relevant_chunk_ids": ["民法典.md#114"]}
+{"id": "term_002", "query": "租房押金能退吗？", "relevant_chunk_ids": ["民法典.md#149", "民法典.md#155"]}
+{"id": "term_003", "query": "约定的违约金过高可以请求减少吗？", "relevant_chunk_ids": ["民法典.md#124"]}
+{"id": "term_004", "query": "买卖不破租赁是什么意思？", "relevant_chunk_ids": ["民法典.md#153"]}
+{"id": "term_005", "query": "哪些债务属于夫妻共同债务？", "relevant_chunk_ids": ["民法典.md#223"]}
+{"id": "term_006", "query": "离婚冷静期是多久？", "relevant_chunk_ids": ["民法典.md#227"]}
+{"id": "term_007", "query": "自书遗嘱需要见证人吗？", "relevant_chunk_ids": ["民法典.md#242"]}
+{"id": "term_008", "query": "高空抛物找不到人谁赔偿？", "relevant_chunk_ids": ["民法典.md#261"]}
+{"id": "term_009", "query": "个人信息受法律保护吗？", "relevant_chunk_ids": ["民法典.md#216", "民法典.md#217"]}
+{"id": "term_010", "query": "胎儿有继承权吗？", "relevant_chunk_ids": ["民法典.md#244"]}
+{"id": "term_011", "query": "正当防卫造成损害需要赔偿吗？", "relevant_chunk_ids": ["民法典.md#36"]}
+{"id": "term_012", "query": "紧急避险造成损害由谁承担？", "relevant_chunk_ids": ["民法典.md#36"]}
+{"id": "term_013", "query": "民事诉讼时效是几年？", "relevant_chunk_ids": ["民法典.md#37"]}
+{"id": "term_014", "query": "小区车位归谁所有？", "relevant_chunk_ids": ["民法典.md#52"]}
+{"id": "term_015", "query": "业主大会决定哪些事项需要多数同意？", "relevant_chunk_ids": ["民法典.md#52"]}
+{"id": "term_016", "query": "什么是居住权？", "relevant_chunk_ids": ["民法典.md#71", "民法典.md#71"]}
+{"id": "term_017", "query": "土地承包经营权期限是多久？", "relevant_chunk_ids": ["民法典.md#66"]}
+{"id": "term_018", "query": "房屋抵押必须登记吗？", "relevant_chunk_ids": ["民法典.md#79"]}
+{"id": "term_019", "query": "动产质权什么时候设立？", "relevant_chunk_ids": ["民法典.md#87"]}
+{"id": "term_020", "query": "留置权适用于哪些情形？", "relevant_chunk_ids": ["民法典.md#91", "民法典.md#91"]}
+{"id": "term_021", "query": "格式条款什么情况下无效？", "relevant_chunk_ids": ["民法典.md#101"]}
+{"id": "term_022", "query": "缔约过失责任是什么？", "relevant_chunk_ids": ["民法典.md#102"]}
+{"id": "term_023", "query": "定金罚则怎么适用？", "relevant_chunk_ids": ["民法典.md#124"]}
+{"id": "term_024", "query": "不可抗力导致违约需要赔偿吗？", "relevant_chunk_ids": ["民法典.md#125"]}
+{"id": "term_025", "query": "赠与人在什么情况下可以撤销赠与？", "relevant_chunk_ids": ["民法典.md#139", "民法典.md#140"]}
+{"id": "term_026", "query": "民间借贷没有约定利息怎么办？", "relevant_chunk_ids": ["民法典.md#143"]}
+{"id": "term_027", "query": "保证方式没有约定怎么认定？", "relevant_chunk_ids": ["民法典.md#144"]}
+{"id": "term_028", "query": "租赁合同最长可以签多少年？", "relevant_chunk_ids": ["民法典.md#149"]}
+{"id": "term_029", "query": "承租人擅自转租有什么后果？", "relevant_chunk_ids": ["民法典.md#152"]}
+{"id": "term_030", "query": "承租人有没有优先购买权？", "relevant_chunk_ids": ["民法典.md#154"]}
+{"id": "term_031", "query": "建设工程价款有优先受偿权吗？", "relevant_chunk_ids": ["民法典.md#170"]}
+{"id": "term_032", "query": "保管物毁损谁承担责任？", "relevant_chunk_ids": ["民法典.md#189"]}
+{"id": "term_033", "query": "委托合同可以随时解除吗？", "relevant_chunk_ids": ["民法典.md#198"]}
+{"id": "term_034", "query": "中介促成合同但未约定报酬怎么办？", "relevant_chunk_ids": ["民法典.md#205"]}
+{"id": "term_035", "query": "合伙合同如何分配利润？", "relevant_chunk_ids": ["民法典.md#207"]}
+{"id": "term_036", "query": "无因管理可以请求支付费用吗？", "relevant_chunk_ids": ["民法典.md#209"]}
+{"id": "term_037", "query": "不当得利需要返还吗？", "relevant_chunk_ids": ["民法典.md#209"]}
+{"id": "term_038", "query": "侵犯姓名权有哪些形式？", "relevant_chunk_ids": ["民法典.md#213"]}
+{"id": "term_039", "query": "制作表情包丑化他人肖像侵权吗？", "relevant_chunk_ids": ["民法典.md#214"]}
+{"id": "term_040", "query": "如何认定侵害名誉权？", "relevant_chunk_ids": ["民法典.md#215"]}
+{"id": "term_041", "query": "哪些行为侵犯隐私权？", "relevant_chunk_ids": ["民法典.md#216"]}
+{"id": "term_042", "query": "法定结婚年龄是多少？", "relevant_chunk_ids": ["民法典.md#221"]}
+{"id": "term_043", "query": "哪些情形属于无效婚姻？", "relevant_chunk_ids": ["民法典.md#221"]}
+{"id": "term_044", "query": "因胁迫结婚可以撤销吗？", "relevant_chunk_ids": ["民法典.md#221"]}
+{"id": "term_045", "query": "离婚时可以请求损害赔偿的情形有哪些？", "relevant_chunk_ids": ["民法典.md#230"]}
+{"id": "term_046", "query": "法定继承顺序是怎样的？", "relevant_chunk_ids": ["民法典.md#241"]}
+{"id": "term_047", "query": "什么是代位继承？", "relevant_chunk_ids": ["民法典.md#241"]}
+{"id": "term_048", "query": "多份遗嘱内容抵触以哪份为准？", "relevant_chunk_ids": ["民法典.md#242"]}
+{"id": "term_049", "query": "遗赠扶养协议与遗嘱哪个优先？", "relevant_chunk_ids": ["民法典.md#240"]}
+{"id": "term_050", "query": "产品缺陷造成损害向谁索赔？", "relevant_chunk_ids": ["民法典.md#255"]}
