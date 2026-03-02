@@ -43,6 +43,9 @@ class ContractResponse(BaseModel):
     user_id: int
     filename: str
     file_path: str
+    file_size: Optional[int] = None
+    file_content: Optional[str] = None
+    chunk_count: Optional[int] = None
     upload_time: datetime
     
     class Config:

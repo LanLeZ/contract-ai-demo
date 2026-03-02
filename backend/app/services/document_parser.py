@@ -1,6 +1,6 @@
 """
 文档解析模块
-支持PDF、DOCX、Markdown格式的文件解析
+支持PDF、DOCX、Markdown、TXT、PNG/JPG/JPEG格式的文件解析（图片使用OCR）
 """
 import os
 from pathlib import Path
@@ -35,6 +35,10 @@ class DocumentParser:
             return self._parse_docx(file_path)
         elif file_type in ['md', 'markdown']:
             return self._parse_markdown(file_path)
+        elif file_type == 'txt':
+            return self._parse_txt(file_path)
+        elif file_type in ['png', 'image']:
+            return self._parse_image(file_path)
         else:
             raise ValueError(f"不支持的文件类型: {file_type}")
     
@@ -78,6 +82,11 @@ class DocumentParser:
             return 'docx'
         elif ext in ['.md', '.markdown']:
             return 'md'
+        elif ext == '.txt':
+            return 'txt'
+        elif ext in ['.png', '.jpg', '.jpeg']:
+            # 图片统一按 OCR 处理
+            return 'image'
         else:
             raise ValueError(f"无法识别的文件类型: {ext}")
     
@@ -160,5 +169,57 @@ class DocumentParser:
                 raise Exception(f"Markdown文件读取失败: {str(e)}")
         except Exception as e:
             raise Exception(f"Markdown文件读取失败: {str(e)}")
+    
+    def _parse_txt(self, file_path: str) -> str:
+        """解析TXT文件"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            try:
+                with open(file_path, 'r', encoding='gbk') as file:
+                    return file.read()
+            except Exception as e:
+                raise Exception(f"TXT文件读取失败: {str(e)}")
+        except Exception as e:
+            raise Exception(f"TXT文件读取失败: {str(e)}")
+    
+    def _parse_png(self, file_path: str) -> str:
+        """解析PNG文件（使用OCR）- 兼容旧接口"""
+        return self._parse_image(file_path)
+
+    def _parse_image(self, file_path: str) -> str:
+        """解析图片文件（PNG/JPG/JPEG，使用OCR）"""
+        try:
+            # 优先尝试使用 PaddleOCR；如果导入失败或运行出错，自动回退到 pytesseract
+            try:
+                from paddleocr import PaddleOCR
+                ocr = PaddleOCR(use_angle_cls=True, lang='ch')
+                result = ocr.ocr(file_path, cls=True)
+                text = ""
+                if result and result[0]:
+                    for line in result[0]:
+                        if line and len(line) > 0:
+                            text += line[1][0] + "\n"
+                # 如果有识别结果，直接返回；否则尝试后备方案
+                if text.strip():
+                    return text.strip()
+                # 主动抛错以触发后备方案
+                raise RuntimeError("PaddleOCR 返回空结果")
+            except Exception:
+                # 无论是导入失败还是 Paddle 内部错误，都尝试使用 pytesseract
+                try:
+                    from PIL import Image
+                    import pytesseract
+                    image = Image.open(file_path)
+                    text = pytesseract.image_to_string(image, lang='chi_sim+eng')
+                    return text.strip()
+                except ImportError:
+                    raise ImportError(
+                        "请安装OCR库: pip install paddleocr 或 pip install pytesseract pillow"
+                    )
+        except Exception as e:
+            raise Exception(f"图片 OCR解析失败: {str(e)}")
 
 

@@ -25,6 +25,9 @@ class Contract(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer)  # 文件大小（字节）
+    file_content = Column(Text)  # 解析后的文本内容
+    chunk_count = Column(Integer)  # 分块数量
     upload_time = Column(DateTime(timezone=True), server_default=func.now())
     
     # 关系

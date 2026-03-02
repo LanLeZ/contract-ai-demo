@@ -6,8 +6,9 @@ import shutil
 import logging
 import traceback
 from pathlib import Path
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from datetime import datetime
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas
@@ -59,7 +60,7 @@ async def upload_document(
         )
     
     file_ext = Path(file.filename).suffix.lower()
-    allowed_extensions = ['.pdf', '.docx', '.md', '.markdown']
+    allowed_extensions = ['.pdf', '.docx', '.md', '.markdown', '.txt', '.png', '.jpg', '.jpeg']
     if file_ext not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -152,7 +153,10 @@ async def upload_document(
         db_contract = models.Contract(
             user_id=current_user.id,
             filename=file.filename,
-            file_path=str(file_path)
+            file_path=str(file_path),
+            file_size=file_size,  # 添加文件大小
+            file_content=text_content,  # 添加文件内容
+            chunk_count=len(chunks)  # 添加分块数量
         )
         db.add(db_contract)
         db.commit()
@@ -192,6 +196,132 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"文件上传失败: {str(e)}"
         )
+
+
+@router.post("/upload-images", response_model=schemas.ContractResponse, status_code=status.HTTP_201_CREATED)
+async def upload_images_as_one_contract(
+    files: List[UploadFile] = File(...),
+    display_name: Optional[str] = Form(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    多张图片合并成一份合同并向量化
+    - 前端可多次追加图片页，最终一次性上传
+    - 后端逐张 OCR → 拼接 → 切分 → 向量化 → 保存一条合同记录
+    """
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请至少上传一张图片")
+
+    allowed_image_ext = {".png", ".jpg", ".jpeg"}
+
+    # 创建合同目录
+    user_dir = ensure_upload_dir(current_user.id)
+    safe_stem = Path(display_name or "图片合同").stem.strip() or "图片合同"
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    contract_dir = user_dir / f"{safe_stem}_{ts}"
+    contract_dir.mkdir(parents=True, exist_ok=True)
+
+    total_size = 0
+    max_total_size = 50 * 1024 * 1024  # 50MB
+    saved_paths: List[Path] = []
+
+    try:
+        # 1) 保存每一页图片
+        for idx, f in enumerate(files, start=1):
+            if not f.filename:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件名不能为空")
+
+            ext = Path(f.filename).suffix.lower()
+            if ext not in allowed_image_ext:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"不支持的图片类型: {ext}。支持: {', '.join(sorted(allowed_image_ext))}",
+                )
+
+            out_path = contract_dir / f"page_{idx:03d}{ext}"
+            with open(out_path, "wb") as buffer:
+                while True:
+                    chunk = await f.read(1024 * 1024)  # 1MB
+                    if not chunk:
+                        break
+                    total_size += len(chunk)
+                    if total_size > max_total_size:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片总大小超过限制（最大50MB）")
+                    buffer.write(chunk)
+
+            saved_paths.append(out_path)
+
+        if not saved_paths:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未保存任何图片")
+
+        # 2) OCR + 拼接文本
+        pages_text: List[str] = []
+        for i, p in enumerate(saved_paths, start=1):
+            page_text = parser.parse(str(p), file_type=None)
+            page_text = (page_text or "").strip()
+            if page_text:
+                pages_text.append(f"\n\n--- Page {i} ---\n{page_text}\n")
+
+        text_content = "".join(pages_text).strip()
+        if not text_content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片内容为空或无法提取文本")
+
+        # 3) 切分文本
+        contract_filename = (display_name or f"{safe_stem}_pages{len(saved_paths)}.png").strip()
+        chunks = splitter.split_with_metadata(
+            text=text_content,
+            source_name=contract_filename,
+            source_type="contract",
+            user_id=current_user.id,
+            contract_id=None,
+        )
+        if not chunks:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文本切分失败")
+
+        # 4) 保存合同记录
+        db_contract = models.Contract(
+            user_id=current_user.id,
+            filename=contract_filename,
+            file_path=str(contract_dir),  # 目录
+            file_size=total_size,
+            file_content=text_content,
+            chunk_count=len(chunks),
+        )
+        db.add(db_contract)
+        db.commit()
+        db.refresh(db_contract)
+
+        # 5) 更新 chunks 的 contract_id 元数据
+        for chunk in chunks:
+            chunk["metadata"]["contract_id"] = db_contract.id
+
+        # 6) 向量化
+        try:
+            logger.info(f"开始向量化（图片合同）{len(chunks)} 个文档块...")
+            vector_store.add_documents(chunks, batch_size=50)
+            logger.info(f"向量化完成（图片合同），成功添加 {len(chunks)} 个文档块")
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            logger.error(f"向量化失败（图片合同）: {str(e)}\n{error_traceback}")
+            db.delete(db_contract)
+            db.commit()
+            if contract_dir.exists():
+                shutil.rmtree(contract_dir, ignore_errors=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"向量化失败: {str(e)}")
+
+        return db_contract
+
+    except HTTPException:
+        if contract_dir.exists():
+            shutil.rmtree(contract_dir, ignore_errors=True)
+        raise
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        logger.error(f"图片合同上传失败: {str(e)}\n{error_traceback}")
+        if contract_dir.exists():
+            shutil.rmtree(contract_dir, ignore_errors=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"图片合同上传失败: {str(e)}")
 
 
 @router.get("/", response_model=List[schemas.ContractResponse])
@@ -250,7 +380,10 @@ async def delete_document(
         # 1. 删除文件
         file_path = Path(contract.file_path)
         if file_path.exists():
-            os.unlink(file_path)
+            if file_path.is_dir():
+                shutil.rmtree(file_path, ignore_errors=True)
+            else:
+                os.unlink(file_path)
         
         # 2. 删除向量库中的相关文档
         # 注意：ChromaDB没有直接按metadata删除的API，这里先删除数据库记录

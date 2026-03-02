@@ -1,0 +1,1 @@
+{"timestamp": "2026-03-02T11:56:08", "script": "batch_import.py", "directory": "..\\Law-Book", "source_type": "legal", "chunk_size": 800, "chunk_overlap": 100, "total_files": 288, "success_files": 288, "failed_files": 0, "total_chunks": 4832, "persist_directory": "./chroma_db", "collection_name": "legal_contracts", "collection_count_after": 4832}

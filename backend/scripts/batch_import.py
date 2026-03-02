@@ -6,6 +6,8 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import json
+from datetime import datetime
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -133,6 +135,49 @@ def import_law_files(directory: str, source_type: str = "legal", clear_existing:
     print(f"  总文本块数: {total_chunks}")
     print(f"  向量库总文档数: {vector_store.get_collection_count()}")
     print("=" * 60)
+
+    # 记录导入日志到文件（JSON Lines 格式）
+    # 根据 source_type 还原本次使用的切分参数
+    if source_type == "legal":
+        chunk_size = splitter.chunk_size
+        chunk_overlap = splitter.chunk_overlap
+    else:
+        # 合同切分器使用固定参数，优先从实例上读取，保证与实现保持一致
+        contract_splitter = getattr(splitter, "contract_splitter", None)
+        if contract_splitter is not None:
+            chunk_size = getattr(contract_splitter, "chunk_size", 200)
+            chunk_overlap = getattr(contract_splitter, "chunk_overlap", 60)
+        else:
+            chunk_size = 200
+            chunk_overlap = 60
+
+    log_record = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "script": "batch_import.py",
+        "directory": str(dir_path),
+        "source_type": source_type,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+        "total_files": total_files,
+        "success_files": success_files,
+        "failed_files": failed_files,
+        "total_chunks": total_chunks,
+        "persist_directory": vector_store.persist_directory,
+        "collection_name": vector_store.collection_name,
+        "collection_count_after": vector_store.get_collection_count(),
+    }
+
+    # 日志目录放在 backend/logs 下，避免受当前工作目录影响
+    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "batch_import_history.jsonl"
+
+    try:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(log_record, ensure_ascii=False) + "\n")
+        print(f"📒 已将本次导入记录追加到 {log_path}")
+    except Exception as e:
+        print(f"⚠️ 写入导入日志失败: {e}")
 
 
 def main():
