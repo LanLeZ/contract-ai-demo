@@ -16,6 +16,7 @@ from app.security import get_current_user
 from app.services.document_parser import DocumentParser
 from app.services.text_splitter import LawTextSplitter
 from app.services.vector_store import VectorStore
+from app.services.llm import QwenChatClient
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ router = APIRouter()
 parser = DocumentParser()
 splitter = LawTextSplitter(chunk_size=500, chunk_overlap=50)
 vector_store = VectorStore()
+qwen_client = QwenChatClient()
 
 # 上传文件存储目录
 UPLOAD_DIR = Path("./uploads")

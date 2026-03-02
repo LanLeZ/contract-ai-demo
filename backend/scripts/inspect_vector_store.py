@@ -18,20 +18,7 @@ from app.services.vector_store import VectorStore
 
 
 def inspect_vector_store():
-    """
-    业务含义：
-        - 对当前向量库做一次“体检”，帮助判断底层语料是否完整、结构是否符合预期；
-        - 区分法律条文 (source_type='legal') 与用户上传合同 (source_type='contract')，
-          方便评估批量导入和线上业务使用情况。
-
-    技术实现：
-        - 通过 app.services.vector_store.VectorStore 封装访问 ChromaDB 默认集合；
-        - 调用 get_collection_info() 获取集合级统计信息（名称、总文档数等）；
-        - 使用 collection.get(include=['metadatas', 'documents']) 直接从 ChromaDB 拉取所有文档，
-          在当前数据规模下于内存中完成各维度聚合统计；
-        - 使用 Counter / defaultdict 在 Python 侧对 source_type / source_name / user_id / contract_id
-          做统计和 Top N 排序，并打印示例 metadata 与内容预览。
-    """
+    """详细检查向量库中的内容"""
     print("=" * 80)
     print("🔍 向量库详细内容检查")
     print("=" * 80)
@@ -129,20 +116,24 @@ def inspect_vector_store():
         print("-" * 80)
         
         for user_id, count in user_id_counter.most_common():
-            if user_id == 'unknown':
+            # 统一转成字符串，避免 int 使用 :s 报错
+            user_id_str = str(user_id)
+            if user_id_str == 'unknown':
                 print(f"  未知用户 (批量导入): {count:6d} 个")
             else:
-                print(f"  用户 ID {user_id:10s}: {count:6d} 个")
+                print(f"  用户 ID {user_id_str:10s}: {count:6d} 个")
         
         print("\n" + "-" * 80)
         print("📋 按合同 (contract_id) 统计 (Top 10):")
         print("-" * 80)
         
         for contract_id, count in contract_id_counter.most_common(10):
-            if contract_id == 'unknown':
+            # 统一转成字符串，避免 int 使用 :s 报错
+            contract_id_str = str(contract_id)
+            if contract_id_str == 'unknown':
                 print(f"  未知合同 (批量导入): {count:6d} 个")
             else:
-                print(f"  合同 ID {contract_id:10s}: {count:6d} 个")
+                print(f"  合同 ID {contract_id_str:10s}: {count:6d} 个")
         
         # 显示一些示例文档的 metadata
         print("\n" + "=" * 80)
@@ -175,21 +166,15 @@ def inspect_vector_store():
         print(f"\n❌ 获取文档时出错: {str(e)}")
         import traceback
         traceback.print_exc()
-        return None
+        # 如果 vector_store 已经成功创建，仍然返回它，避免被当做“空向量库”
+        try:
+            return vector_store
+        except NameError:
+            return None
 
 
 def test_retrieval(vector_store: VectorStore):
-    """
-    业务含义：
-        - 使用一组“租房合同”场景下的典型问题，对向量检索能力做端到端验证；
-        - 帮助业务/产品快速判断：当前向量库 + 检索策略，能否命中正确的合同条款或法律条文。
-
-    技术实现：
-        - 依赖 VectorStore.search(query, top_k=3) 完成语义检索；
-        - 由底层 embedding 模型与向量相似度度量提供 score / distance；
-        - 通过 metadata 中的 source_name / source_type / user_id / contract_id
-          恢复命中的具体来源，并打印片段内容做人工抽检。
-    """
+    """测试检索功能，验证向量化是否真的有用"""
     print("\n" + "=" * 80)
     print("🧪 测试检索功能 - 验证向量化是否有效")
     print("=" * 80)
@@ -213,7 +198,12 @@ def test_retrieval(vector_store: VectorStore):
         
         try:
             # 使用 VectorStore 的 search 方法检索最相关的3个段落
-            results = vector_store.search(question, top_k=3)
+            # 只对法律条文（source_type='legal'）进行测试，排除合同文档
+            results = vector_store.search(
+                question,
+                top_k=3,
+                filter_metadata={"source_type": "legal"}
+            )
             
             if not results:
                 print("⚠️  未找到相关文档")

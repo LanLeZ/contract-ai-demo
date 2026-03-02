@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, documents, search
+from app.api import auth, documents, search, qa
 from app.database import engine, Base
 
 # 创建数据库表
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(documents.router, prefix="/api/documents", tags=["文档管理"])
 app.include_router(search.router, prefix="/api/search", tags=["向量搜索"])
+app.include_router(qa.router, prefix="/api", tags=["智能问答"])
 
 @app.get("/")
 async def root():

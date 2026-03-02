@@ -38,14 +38,14 @@ class DashScopeEmbedder:
         self.model = model
         
         # 检查是否使用中转平台 API
-        self.api_base_url = os.getenv("EMBEDDING_API_BASE_URL") or os.getenv("DASHSCOPE_API_BASE_URL")
-        self.api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+        self.api_base_url = os.getenv("EMBEDDING_API_BASE_URL")
+        self.api_key = os.getenv("EMBEDDING_API_KEY")
         
         if not self.api_key:
             raise ValueError(
                 "未找到 API Key。请在.env文件中设置：\n"
                 "- EMBEDDING_API_KEY=your-key（使用中转平台时）\n"
-                "- 或 DASHSCOPE_API_KEY=your-key（使用 DashScope SDK 时）"
+            
             )
         
         # 如果设置了 API_BASE_URL，使用 HTTP 请求方式（中转平台）
