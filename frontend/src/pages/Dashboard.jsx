@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Button, Card, Space, Typography, message } from 'antd'
-import { LogoutOutlined, UserOutlined, FileTextOutlined } from '@ant-design/icons'
+import { LogoutOutlined, UserOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons'
 import { useAuth } from '../hooks/useAuth'
 import { authService } from '../services/auth'
 
@@ -55,6 +55,12 @@ const Dashboard = () => {
         <Title level={3} style={{ margin: 0 }}>合同智能解读系统</Title>
         <Space>
           <Text>{userInfo?.username || user?.username}</Text>
+          <Button
+            icon={<SettingOutlined />}
+            onClick={() => navigate('/profile')}
+          >
+            个人中心
+          </Button>
           <Button 
             type="primary" 
             icon={<LogoutOutlined />}
@@ -70,14 +76,6 @@ const Dashboard = () => {
             <Title level={4}>
               <UserOutlined /> 欢迎，{userInfo?.username || user?.username}！
             </Title>
-            <Card>
-              <Title level={5}>用户信息</Title>
-              <Space direction="vertical">
-                <Text><strong>用户名：</strong>{userInfo?.username}</Text>
-                <Text><strong>邮箱：</strong>{userInfo?.email}</Text>
-                <Text><strong>注册时间：</strong>{userInfo?.created_at ? new Date(userInfo.created_at).toLocaleString('zh-CN') : '-'}</Text>
-              </Space>
-            </Card>
             <Card>
               <Title level={5}>功能导航</Title>
               <Space direction="vertical" size="middle" style={{ width: '100%' }}>

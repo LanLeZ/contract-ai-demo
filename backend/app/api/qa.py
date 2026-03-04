@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -117,16 +118,22 @@ async def contract_qa(
 
     question = body.question.strip()
 
-    # 2. 确定检索范围：优先使用前端传入的 scope_hint，否则调用 LLM 分类
-    scope: str
-    if body.scope_hint in ("contract_only", "contract_and_law"):
-        scope = body.scope_hint
+    # 2.1 处理会话 ID：如果前端未传入，则视为开启新会话
+    if body.session_id:
+        session_id = body.session_id
     else:
-        try:
-            scope = qwen_client.classify_scope(question)
-        except Exception as e:
-            logger.warning("classify_scope 失败，回退为 contract_only: %s", e)
-            scope = "contract_only"
+        # 使用 UUID 生成一个新的会话 ID
+        session_id = uuid.uuid4().hex
+
+    # 2. 确定检索范围：一次性分析 scope + law_names
+    law_names: List[str] = []
+    try:
+        scope, law_names = qwen_client.analyze_scope_and_laws(question)
+        logger.info("scope=%s, law_names=%s", scope, law_names)
+    except Exception as e:
+        logger.exception("analyze_scope_and_laws 失败，回退为 contract_only")
+        scope = "contract_only"
+        law_names = []
 
     # 3. 执行向量检索
     contract_results: List[Dict[str, Any]] = []
@@ -147,17 +154,92 @@ async def contract_qa(
         logger.error("合同向量检索失败，将在无合同上下文的情况下回答: %s", e)
         contract_results = []
 
-    # 3.2 如有需要，再检索法律条文
+    # 3.2 如有需要，再检索法律条文（利用 law_names 做更精确匹配）
     if scope == "contract_and_law":
-        try:
-            legal_results = vector_store.search(
-                query=question,
-                top_k=5,
-                filter_metadata={
-                    "user_id": current_user.id,
-                    "source_type": "legal",
-                },
+        # 使用 analyze_scope_and_laws 返回的法律名称；如果没有，就在法律库中不加限定检索
+        if law_names:
+            logger.info("[Legal Retrieval] 从 analyze_scope_and_laws 抽取到法律名称: %s", law_names)
+        else:
+            logger.info(
+                "[Legal Retrieval] analyze_scope_and_laws 未抽取到法律名称，将在法律库中不加限定检索"
             )
+
+        # 组装基础 filter_metadata
+        # 注意：法律条文是“公共语料”，导入时通常不会写入 user_id；
+        # 若在这里附加 user_id 会导致 where 过滤后 0 命中，看起来像“没有检索到”。
+        legal_filter = {"source_type": "legal"}
+
+        try:
+            # 先进行全法律库检索（如果抽取到法律名称，增加 top_k 以获取更多候选）
+            search_top_k = 10 if law_names else 5
+            logger.info(
+                "[Legal Retrieval] query top_k=%s filter=%s", search_top_k, legal_filter
+            )
+            all_legal_results = vector_store.search(
+                query=question,
+                top_k=search_top_k,
+                filter_metadata=legal_filter,
+            )
+            logger.info(
+                "[Legal Retrieval] raw results count=%d", len(all_legal_results)
+            )
+            if all_legal_results:
+                top1_meta = all_legal_results[0].get("metadata") or {}
+                logger.info(
+                    "[Legal Retrieval] top1 score=%.4f source_name=%s",
+                    float(all_legal_results[0].get("score", -1.0)),
+                    top1_meta.get("source_name"),
+                )
+
+            # 如果抽取到了法律名称，在结果中按“Law-Book 文件名风格”进行归一化匹配
+            if law_names and all_legal_results:
+                import os
+                import re
+
+                def _normalize_law_key(s: str) -> str:
+                    x = (s or "").strip().lower()
+                    x = x.replace("《", "").replace("》", "")
+                    x = x.replace("中华人民共和国", "").replace("中国", "")
+                    # 去掉路径前缀，例如 3-民法商法/电子签名法（2019-04-23）.md
+                    x = os.path.basename(x)
+                    # 去扩展名
+                    x = re.sub(r"\.(md|markdown)$", "", x, flags=re.IGNORECASE)
+                    # 去掉尾部日期括号（全角/半角）
+                    x = re.sub(r"（\d{4}-\d{2}-\d{2}）$", "", x)
+                    x = re.sub(r"\(\d{4}-\d{2}-\d{2}\)$", "", x)
+                    # 去掉空白
+                    x = re.sub(r"\s+", "", x)
+                    return x
+
+                targets = {_normalize_law_key(n) for n in law_names if _normalize_law_key(n)}
+
+                filtered_results = []
+                for result in all_legal_results:
+                    metadata = result.get("metadata") or {}
+                    # 只使用 source_name 做匹配：这是 Law-Book 导入时稳定存在的字段
+                    source_name_norm = _normalize_law_key(str(metadata.get("source_name", "")))
+                    if not source_name_norm:
+                        continue
+
+                    # 只要任一目标在 source_name 中出现（或相互包含），即认为匹配
+                    matched = any(t and (t in source_name_norm or source_name_norm in t) for t in targets)
+                    if matched:
+                        filtered_results.append(result)
+
+                if filtered_results:
+                    legal_results = filtered_results[:5]
+                    logger.info(
+                        "[Legal Retrieval] 使用法律简称归一化匹配，从 %d 个结果中筛选出 %d 个",
+                        len(all_legal_results),
+                        len(legal_results),
+                    )
+                else:
+                    legal_results = all_legal_results[:5]
+                    logger.info(
+                        "[Legal Retrieval] 法律简称归一化匹配后无命中，使用全部检索结果"
+                    )
+            else:
+                legal_results = all_legal_results[:5]
         except Exception as e:
             logger.error("法律条文向量检索失败，退化为仅基于合同片段回答: %s", e)
             legal_results = []
@@ -235,37 +317,14 @@ async def contract_qa(
             "请你仅基于一般的合同与法律常识，给出风险提示和建议。）"
         )
 
-    # 5. 构造 RAG Prompt 调用 LLM
-    system_prompt = (
-        "你是一名精通中国合同与民商事法律的智能助手。\n"
-        "你必须严格基于“检索到的合同条款片段”和“检索到的法律条文片段”来回答问题，"
-        "优先引用这些片段中的关键信息进行分析与说明。\n"
-        "如果上下文中没有足够信息支撑某个结论，请明确说明“上下文未提供相关条款/法条，因此只能给出一般性提示”，"
-        "不要编造具体的条款号、法条内容或当事人名称。\n"
-        "在回答中请尽量使用通俗易懂的中文，并在需要时给出实际操作建议（例如是否需要补充条款、修改条款或咨询律师）。"
-    )
-
-    user_prompt = (
-        f"这是用户上传的一份合同：\n"
-        f"- 文件名：{contract.filename}\n"
-        f"- 问题检索范围：{scope}\n\n"
-        f"以下是根据用户问题检索到的相关上下文（可能包括合同条款和法律条文）：\n\n"
-        f"{context_text}\n\n"
-        f"请你结合上述上下文，回答用户的问题：\n"
-        f"{question}\n\n"
-        "请注意：\n"
-        "1. 优先引用给定片段中的信息进行分析，可以在表述中用“根据检索到的第[编号]条片段”来提示依据来源；\n"
-        "2. 如果某个关键信息在上下文中找不到，请明确说明缺失，不要自行编造；\n"
-        "3. 最后请用一两句话做“综合风险总结”和“建议下一步怎么做”。"
-    )
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
+    # 5. 调用 LLM 基于 RAG 上下文回答问题
     try:
-        answer = qwen_client.chat(messages)
+        answer = qwen_client.answer_question_with_rag(
+            question=question,
+            contract_filename=contract.filename,
+            scope=scope,
+            context_text=context_text,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -274,31 +333,174 @@ async def contract_qa(
 
     # 在后端日志中打印当前问题和回答简要信息，便于联调观察
     logger.info(
-        "[Contract QA] contract_id=%s, user_id=%s, scope=%s, Q=%r, A(前80字符)=%r",
+        "[Contract QA] contract_id=%s, user_id=%s, scope=%s, session_id=%s, Q=%r, A(前80字符)=%r",
         contract_id,
         current_user.id,
         scope,
+        session_id,
         question,
         (answer or "")[:80],
     )
 
-    # 6. 记录一条对话历史（简单版：每一问一答一条记录）
+    # 6. 记录一条对话历史（每一问一答一条记录，带上会话 ID）
     conversation = models.Conversation(
         user_id=current_user.id,
         contract_id=contract.id,
         question=question,
         answer=answer,
+        session_id=session_id,
     )
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
 
-    # 7. 返回响应（包含引用与实际检索范围）
+    # 7. 返回响应（包含引用、实际检索范围和当前会话 ID）
     return schemas.QAResponse(
         answer=answer,
         citations=citations,
-        session_id=body.session_id,
+        session_id=session_id,
         scope=scope,
     )
 
 
+@router.get(
+    "/documents/{contract_id}/sessions",
+    response_model=schemas.ConversationSessionListResponse,
+)
+def list_conversation_sessions(
+    contract_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    列出当前用户在某份合同下的历史会话（按 session_id 聚合）。
+
+    默认按最近对话时间倒序排列。
+    """
+    # 校验合同归属
+    contract = (
+        db.query(models.Contract)
+        .filter(
+            models.Contract.id == contract_id,
+            models.Contract.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not contract:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="合同不存在或无权限访问",
+        )
+
+    # 按 session_id 聚合最近一条记录和计数
+    from sqlalchemy import func as sa_func
+
+    subq = (
+        db.query(
+            models.Conversation.session_id.label("session_id"),
+            sa_func.max(models.Conversation.id).label("max_id"),
+            sa_func.count(models.Conversation.id).label("cnt"),
+        )
+        .filter(
+            models.Conversation.user_id == current_user.id,
+            models.Conversation.contract_id == contract_id,
+        )
+        .group_by(models.Conversation.session_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(models.Conversation, subq.c.cnt)
+        .join(
+            subq,
+            (models.Conversation.id == subq.c.max_id)
+            & (models.Conversation.session_id == subq.c.session_id),
+        )
+        .order_by(models.Conversation.created_at.desc())
+        .all()
+    )
+
+    sessions: List[schemas.ConversationSession] = []
+    for conv, cnt in rows:
+        sessions.append(
+            schemas.ConversationSession(
+                session_id=conv.session_id,
+                contract_id=conv.contract_id,
+                last_question=conv.question,
+                last_answer=conv.answer,
+                last_time=conv.created_at,
+                message_count=cnt,
+            )
+        )
+
+    return schemas.ConversationSessionListResponse(sessions=sessions)
+
+
+@router.get(
+    "/documents/{contract_id}/sessions/{session_id}",
+    response_model=schemas.ConversationHistoryResponse,
+)
+def get_conversation_history(
+    contract_id: int,
+    session_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    获取某个会话（按 session_id）的完整问答历史。
+    """
+    # 校验合同归属
+    contract = (
+        db.query(models.Contract)
+        .filter(
+            models.Contract.id == contract_id,
+            models.Contract.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not contract:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="合同不存在或无权限访问",
+        )
+
+    conversations = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.user_id == current_user.id,
+            models.Conversation.contract_id == contract_id,
+            models.Conversation.session_id == session_id,
+        )
+        .order_by(models.Conversation.created_at.asc())
+        .all()
+    )
+
+    if not conversations:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="未找到该会话历史",
+        )
+
+    messages: List[schemas.ConversationMessage] = []
+    for conv in conversations:
+        # 一问一答两条消息
+        messages.append(
+            schemas.ConversationMessage(
+                role="user",
+                content=conv.question,
+                created_at=conv.created_at,
+            )
+        )
+        messages.append(
+            schemas.ConversationMessage(
+                role="assistant",
+                content=conv.answer,
+                created_at=conv.created_at,
+            )
+        )
+
+    return schemas.ConversationHistoryResponse(
+        session_id=session_id,
+        contract_id=contract_id,
+        messages=messages,
+    )

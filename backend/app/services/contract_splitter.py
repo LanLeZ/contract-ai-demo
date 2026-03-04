@@ -46,8 +46,6 @@ class ContractTextSplitter(BaseTextSplitter):
                 "\n\n",        # 双换行
                 "\n",          # 单换行
                 "，",          # 逗号
-                " ",           # 空格
-                ""             # 最后按字符切分
             ]
         )
     
@@ -262,4 +260,22 @@ class ContractTextSplitter(BaseTextSplitter):
                         result.append(new_chunk)
         
         return result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

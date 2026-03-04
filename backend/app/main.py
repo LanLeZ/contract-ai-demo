@@ -1,7 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, documents, search, qa
+from app.api import auth, documents, search, qa, kg
 from app.database import engine, Base
+
+import logging
+import sys
+
+LOG_LEVEL = logging.INFO  # 如果想看 debug 就改成 logging.DEBUG
+
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ],
+)
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -21,11 +34,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import FastAPI
+
 # 注册路由
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(documents.router, prefix="/api/documents", tags=["文档管理"])
 app.include_router(search.router, prefix="/api/search", tags=["向量搜索"])
 app.include_router(qa.router, prefix="/api", tags=["智能问答"])
+app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
 
 @app.get("/")
 async def root():

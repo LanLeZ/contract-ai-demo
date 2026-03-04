@@ -34,6 +34,29 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = Field(
+        default=None,
+        min_length=6,
+        max_length=72,
+        description="密码长度必须在6-72字符之间",
+    )
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, v: Optional[str]) -> Optional[str]:
+        # 允许不更新密码（None）
+        if v is None:
+            return v
+        # 检查 UTF-8 编码后的字节长度
+        password_bytes = v.encode("utf-8")
+        if len(password_bytes) > 72:
+            raise ValueError("密码长度不能超过72字节（UTF-8编码）")
+        return v
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -53,9 +76,15 @@ class ContractResponse(BaseModel):
     file_content: Optional[str] = None
     chunk_count: Optional[int] = None
     upload_time: datetime
-    
+    # 新增：合同类别
+    contract_type: Optional[str] = Field(
+        default=None,
+        description="合同类别：internship / lease / labor / sale / other",
+    )
+
     class Config:
         from_attributes = True
+
 
 
 # 搜索相关Schema
@@ -106,3 +135,53 @@ class QAResponse(BaseModel):
     citations: List[QACitation] = Field(default_factory=list, description="引用的证据列表")
     session_id: Optional[str] = Field(None, description="本轮会话ID，前端需保存")
     scope: Optional[str] = Field(None, description="实际检索范围：contract_only / contract_and_law")
+
+
+# 会话历史相关 Schema
+class ConversationMessage(BaseModel):
+    role: str = Field(..., description="角色：user / assistant")
+    content: str = Field(..., description="消息内容")
+    created_at: datetime
+
+
+class ConversationSession(BaseModel):
+    session_id: str = Field(..., description="会话ID")
+    contract_id: int = Field(..., description="合同ID")
+    last_question: str = Field(..., description="最近一次提问")
+    last_answer: str = Field(..., description="最近一次回答")
+    last_time: datetime = Field(..., description="最近对话时间")
+    message_count: int = Field(..., description="该会话问题条数（一问一答记一条）")
+
+
+class ConversationSessionListResponse(BaseModel):
+    sessions: List[ConversationSession]
+
+
+class ConversationHistoryResponse(BaseModel):
+    session_id: str
+    contract_id: int
+    messages: List[ConversationMessage]
+
+
+# ====== 知识图谱相关 Schema ======
+
+class KGTriple(BaseModel):
+    id: int
+    contract_id: int
+    head: str
+    head_type: Optional[str] = None
+    relation: str
+    tail: str
+    tail_type: Optional[str] = None
+    evidence: Optional[str] = None
+    template_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class KGExtractResponse(BaseModel):
+    contract_id: int
+    contract_type: Optional[str] = None
+    triples: List[KGTriple]

@@ -66,3 +66,21 @@ with open(terms_path, 'r', encoding='utf-8') as f:
             new_chunk_ids.append(article)
     print(f"  转换后: {new_chunk_ids}")
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

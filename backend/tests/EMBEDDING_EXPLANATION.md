@@ -143,3 +143,21 @@ results = vector_store.search(query_vector, top_k=5)
 这就是为什么只用Embedding就能判断语义相似度的原因！
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

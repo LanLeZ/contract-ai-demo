@@ -32,3 +32,21 @@ class BaseTextSplitter:
         # 如果清理后还有内容，说明是有效的
         return len(cleaned) > 0
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

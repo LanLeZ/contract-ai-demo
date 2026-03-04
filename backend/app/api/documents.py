@@ -366,7 +366,7 @@ async def delete_document(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """删除合同（包括文件、数据库记录和向量库中的文档）"""
+    """删除合同（包括文件、数据库记录、会话记录和向量库中的文档）"""
     contract = db.query(models.Contract).filter(
         models.Contract.id == contract_id,
         models.Contract.user_id == current_user.id
@@ -386,13 +386,19 @@ async def delete_document(
                 shutil.rmtree(file_path, ignore_errors=True)
             else:
                 os.unlink(file_path)
-        
-        # 2. 删除向量库中的相关文档
-        # 注意：ChromaDB没有直接按metadata删除的API，这里先删除数据库记录
+
+        # 2. 删除该合同下的所有会话记录，避免产生孤儿会话数据
+        db.query(models.Conversation).filter(
+            models.Conversation.user_id == current_user.id,
+            models.Conversation.contract_id == contract.id
+        ).delete(synchronize_session=False)
+
+        # 3. 删除向量库中的相关文档
+        # 注意：ChromaDB没有直接按metadata删除的API，这里先删除数据库和会话记录
         # 可以考虑在向量库中存储contract_id，然后通过查询+删除的方式清理
         # 暂时先删除数据库记录，向量库中的文档可以定期清理
-        
-        # 3. 删除数据库记录
+
+        # 4. 删除数据库中的合同记录
         db.delete(contract)
         db.commit()
         

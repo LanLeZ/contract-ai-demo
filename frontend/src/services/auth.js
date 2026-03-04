@@ -16,7 +16,7 @@ export const authService = {
     const formData = new FormData()
     formData.append('username', username)
     formData.append('password', password)
-    
+
     const response = await api.post('/api/auth/login', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
@@ -30,6 +30,15 @@ export const authService = {
     const response = await api.get('/api/auth/me')
     return response.data
   },
-}
 
+  // 更新当前用户信息（用户名 / 邮箱 / 密码）
+  async updateProfile({ username, email, password }) {
+    const response = await api.put('/api/auth/profile', {
+      username,
+      email,
+      password,
+    })
+    return response.data
+  },
+}
 

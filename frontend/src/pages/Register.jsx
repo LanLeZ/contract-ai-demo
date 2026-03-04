@@ -68,7 +68,20 @@ const Register = () => {
             name="password"
             rules={[
               { required: true, message: '请输入密码!' },
-              { min: 6, message: '密码至少6个字符!' }
+              { min: 8, message: '密码至少8个字符!' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value) {
+                    return Promise.resolve()
+                  }
+                  const hasLetter = /[A-Za-z]/.test(value)
+                  const hasNumber = /\d/.test(value)
+                  if (!hasLetter || !hasNumber) {
+                    return Promise.reject(new Error('密码必须同时包含字母和数字!'))
+                  }
+                  return Promise.resolve()
+                },
+              }),
             ]}
           >
             <Input.Password

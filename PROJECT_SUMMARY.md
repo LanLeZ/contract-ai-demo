@@ -234,3 +234,21 @@ python test_api.py
 - Swagger UI - http://localhost:8000/docs
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

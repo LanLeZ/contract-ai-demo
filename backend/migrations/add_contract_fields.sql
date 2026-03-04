@@ -15,3 +15,21 @@ ALTER TABLE contracts ADD COLUMN chunk_count INTEGER;
 -- UPDATE contracts SET file_size = 0 WHERE file_size IS NULL;
 -- UPDATE contracts SET chunk_count = 0 WHERE chunk_count IS NULL;
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
