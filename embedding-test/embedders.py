@@ -2,6 +2,7 @@
 Embedding 实现（仅保留 DashScope 系列模型，用于本次评测）
 """
 import os
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List
@@ -90,7 +91,7 @@ class DashScopeEmbedder(BaseEmbedder):
         }
         
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response = requests.post(url, json=payload, headers=headers, timeout=300)
             
             # 如果请求失败，打印详细错误信息
             if response.status_code != 200:
@@ -143,11 +144,30 @@ class DashScopeEmbedder(BaseEmbedder):
             return []
         
         MAX_BATCH_SIZE = 10
+        MAX_RETRIES = 3
+        RETRY_BASE_DELAY = 5  # 秒，重试间隔基础时间，后续按 1x/2x/3x 递增
         
         # 如果使用 HTTP API（中转平台），直接调用
         if self._use_http_api:
             if len(texts) <= MAX_BATCH_SIZE:
-                return self._embed_via_http_api(texts)
+                # 小批量时同样增加重试机制
+                last_error = None
+                for attempt in range(1, MAX_RETRIES + 1):
+                    try:
+                        return self._embed_via_http_api(texts)
+                    except Exception as e:
+                        last_error = e
+                        if attempt < MAX_RETRIES:
+                            delay = RETRY_BASE_DELAY * attempt
+                            print(
+                                f"⚠️  Embedding失败（小批量，第 {attempt} 次重试，"
+                                f"{delay}s 后重试）：{e}"
+                            )
+                            time.sleep(delay)
+                        else:
+                            raise Exception(
+                                f"Embedding失败（小批量，多次重试后仍然失败）: {str(last_error)}"
+                            )
             
             # 分批处理
             total_batches = (len(texts) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE
@@ -158,13 +178,29 @@ class DashScopeEmbedder(BaseEmbedder):
                 batch = texts[i:i + MAX_BATCH_SIZE]
                 batch_num = i // MAX_BATCH_SIZE + 1
                 
-                try:
-                    batch_embeddings = self._embed_via_http_api(batch)
-                    all_embeddings.extend(batch_embeddings)
-                    if total_batches > 1:
-                        print(f"    第 {batch_num}/{total_batches} 批完成 ({len(batch)} 条)")
-                except Exception as e:
-                    raise Exception(f"Embedding失败（第 {batch_num} 批）: {str(e)}")
+                # 对每一批增加重试机制，防止偶发网络/中转问题导致整体任务中断
+                last_error = None
+                for attempt in range(1, MAX_RETRIES + 1):
+                    try:
+                        batch_embeddings = self._embed_via_http_api(batch)
+                        all_embeddings.extend(batch_embeddings)
+                        if total_batches > 1:
+                            print(f"    第 {batch_num}/{total_batches} 批完成 ({len(batch)} 条)")
+                        last_error = None
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if attempt < MAX_RETRIES:
+                            delay = RETRY_BASE_DELAY * attempt
+                            print(
+                                f"⚠️  Embedding失败（第 {batch_num} 批，第 {attempt} 次重试，"
+                                f"{delay}s 后重试）：{e}"
+                            )
+                            time.sleep(delay)
+                        else:
+                            raise Exception(
+                                f"Embedding失败（第 {batch_num} 批，多次重试后仍然失败）: {str(last_error)}"
+                            )
             
             return all_embeddings
         
@@ -195,22 +231,38 @@ class DashScopeEmbedder(BaseEmbedder):
             batch = texts[i:i + MAX_BATCH_SIZE]
             batch_num = i // MAX_BATCH_SIZE + 1
             
-            try:
-                response = self._text_embedding.call(
-                    model=self.model,
-                    input=batch,
-                    api_key=self.api_key
-                )
-                
-                if response.status_code == 200:
-                    batch_embeddings = [item['embedding'] for item in response.output['embeddings']]
-                    all_embeddings.extend(batch_embeddings)
-                    if total_batches > 1:
-                        print(f"    第 {batch_num}/{total_batches} 批完成 ({len(batch)} 条)")
-                else:
-                    raise Exception(f"Embedding API错误（第 {batch_num} 批）: {response.message}")
-            except Exception as e:
-                raise Exception(f"Embedding失败（第 {batch_num} 批）: {str(e)}")
+            # DashScope SDK 模式下，同样为每一批增加重试机制
+            last_error = None
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    response = self._text_embedding.call(
+                        model=self.model,
+                        input=batch,
+                        api_key=self.api_key
+                    )
+                    
+                    if response.status_code == 200:
+                        batch_embeddings = [item['embedding'] for item in response.output['embeddings']]
+                        all_embeddings.extend(batch_embeddings)
+                        if total_batches > 1:
+                            print(f"    第 {batch_num}/{total_batches} 批完成 ({len(batch)} 条)")
+                        last_error = None
+                        break
+                    else:
+                        raise Exception(f"Embedding API错误（第 {batch_num} 批）: {response.message}")
+                except Exception as e:
+                    last_error = e
+                    if attempt < MAX_RETRIES:
+                        delay = RETRY_BASE_DELAY * attempt
+                        print(
+                            f"⚠️  Embedding失败（第 {batch_num} 批，第 {attempt} 次重试，"
+                            f"{delay}s 后重试）：{e}"
+                        )
+                        time.sleep(delay)
+                    else:
+                        raise Exception(
+                            f"Embedding失败（第 {batch_num} 批，多次重试后仍然失败）: {str(last_error)}"
+                        )
         
         return all_embeddings
     

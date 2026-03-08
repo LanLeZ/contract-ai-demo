@@ -1,8 +1,10 @@
 """
-法律条文文本切分器
-专门处理Markdown格式的法律条文，优先在条款边界处切分
+法律条文文本切分器（新版本）
+切分逻辑参考 problem_test/demo_split_law_constitution.py：
+1) Markdown：先按标题切，再按“第X条”切成条文，对极长条文用递归规则细分
+2) 普通文本：直接用法律递归规则
 """
-from typing import List, Dict
+from typing import List, Dict, Any
 import re
 import logging
 from app.services.base_splitter import BaseTextSplitter
@@ -10,7 +12,7 @@ from app.services.base_splitter import BaseTextSplitter
 try:
     from langchain.text_splitter import (
         MarkdownHeaderTextSplitter,
-        RecursiveCharacterTextSplitter
+        RecursiveCharacterTextSplitter,
     )
 except ImportError:
     MarkdownHeaderTextSplitter = None
@@ -22,311 +24,289 @@ logger = logging.getLogger(__name__)
 
 
 class LegalTextSplitter(BaseTextSplitter):
-    """法律条文文本切分器"""
-    
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 100, min_chunk_size: int = 50):
+    """
+    法律条文文本切分器（新实现）
+    - Markdown：先按标题切，再按“第X条”切成条文，对极长条文用递归规则细分
+    - 普通文本：直接用法律递归规则
+    """
+
+    def __init__(self, chunk_size: int = 200, chunk_overlap: int = 60, min_chunk_size: int = 50):
         """
         初始化法律条文切分器
         Args:
-            chunk_size: 每个文本块的最大字符数（建议800-1200）
-            chunk_overlap: 文本块之间的重叠字符数（建议100-150）
-            min_chunk_size: 最小chunk大小，小于此值的chunk会尝试合并，无法合并则保留并标记
+            chunk_size: 每个文本块的最大字符数（推荐 200）
+            chunk_overlap: 文本块之间的重叠字符数（推荐 60）
+            min_chunk_size: 保留参数以保持向后兼容，但不再使用（切分规则已明确，无需合并小块）
         """
+        if MarkdownHeaderTextSplitter is None or RecursiveCharacterTextSplitter is None:
+            raise ImportError("langchain未安装，请运行: pip install langchain langchain-community")
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.min_chunk_size = min_chunk_size
-        
-        if MarkdownHeaderTextSplitter is None:
-            raise ImportError("langchain未安装，请运行: pip install langchain langchain-community")
-        
-        # Markdown切分器（按标题层级）
+        self.min_chunk_size = min_chunk_size  # 保留但不使用
+
+        # Markdown 按标题切分（支持 1~4 级标题）
         self.markdown_splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=[
                 ("#", "header_1"),
                 ("##", "header_2"),
                 ("###", "header_3"),
+                ("####", "header_4"),
             ]
         )
-        
-        # 普通文本递归切分器（用于非Markdown格式）
-        self.recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", "。", "，", " ", ""]
-        )
-        
-        # 法律条文专用的递归切分器（优先在条款边界和句号处切分）
-        # 注意：separators 中已经包含了 "\n\n第" 和 "\n第"，会自动在条款边界处切分
-        # 移除了 "，" 和 " "，避免过度切分（法律条文的空格用于分隔编号和内容，不应切分）
-        # 移除了 ""，避免按字符切分（过于细粒度）
+
+        # 法律条文专用递归切分器：优先在条款边界和句号处切
         self.legal_recursive_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            separators=["\n\n第", "\n第", "。", "；", "\n\n", "\n"]
+            separators=[
+                "\n\n第",  # 空行后条款
+                "\n第",   # 行首条款
+                "。",     # 句号
+                "；",     # 分号
+                "\n\n",   # 双换行
+                "\n",     # 单换行
+            ],
         )
-    
-    def _normalize_chunk(self, content: str, metadata: Dict = None) -> Dict:
-        """
-        规范化chunk格式
-        Args:
-            content: chunk内容
-            metadata: 元数据字典
-        Returns:
-            规范化后的chunk字典
-        """
+
+    def _normalize_chunk(self, content: str, metadata: Dict | None = None) -> Dict:
+        """规范化 chunk 格式"""
         if metadata is None:
             metadata = {}
         return {
-            "content": content.strip(),
-            "metadata": metadata.copy()
+            "content": (content or "").strip(),
+            "metadata": metadata.copy(),
         }
-    
-    def _filter_and_merge_chunks(self, chunks: List[Dict]) -> List[Dict]:
+
+    def _is_valid_content(self, content: str) -> bool:
+        """复用基类的有效性判断，过滤掉全标点/空白内容"""
+        return super()._is_valid_content(content)
+
+    def _filter_chunks(self, chunks: List[Dict]) -> List[Dict]:
         """
-        统一过滤和合并策略
-        1. 过滤无效内容
-        2. 对于过小的chunk，优先合并到相邻chunk
-        3. 无法合并的小chunk保留但标记为小chunk
-        
-        Args:
-            chunks: 原始chunk列表
-        Returns:
-            处理后的chunk列表
+        过滤无效内容
+        不再合并过小块，因为切分规则已经明确：Markdown标题 → 条款 → 过长条款再细分
+        短条款是正常的切分结果，无需强制合并
         """
         if not chunks:
             return []
-        
-        # 第一步：过滤无效内容
-        valid_chunks = []
-        for chunk in chunks:
-            content = chunk.get('content', '').strip()
-            if content and self._is_valid_content(content):
-                valid_chunks.append(chunk)
+
+        result: List[Dict] = []
+        for ch in chunks:
+            c = (ch.get("content") or "").strip()
+            if c and self._is_valid_content(c):
+                result.append(ch)
             else:
-                logger.debug(f"过滤无效内容: {content[:50]}...")
-        
-        if not valid_chunks:
-            return []
-        
-        # 第二步：处理过小的chunk（优先合并，无法合并则保留）
-        result = []
-        i = 0
-        while i < len(valid_chunks):
-            current_chunk = valid_chunks[i]
-            content = current_chunk.get('content', '').strip()
-            content_len = len(content)
-            
-            # 如果chunk太小，尝试合并
-            if content_len < self.min_chunk_size:
-                # 尝试合并到下一个chunk
-                if i + 1 < len(valid_chunks):
-                    next_chunk = valid_chunks[i + 1]
-                    next_content = next_chunk.get('content', '').strip()
-                    merged_content = content + "\n\n" + next_content
-                    
-                    # 如果合并后不超过chunk_size，则合并
-                    if len(merged_content) <= self.chunk_size:
-                        merged_chunk = {
-                            "content": merged_content,
-                            "metadata": current_chunk['metadata'].copy()
-                        }
-                        # 合并元数据（优先使用当前chunk的元数据）
-                        merged_chunk['metadata'].update(next_chunk['metadata'])
-                        merged_chunk['metadata']['merged'] = True
-                        merged_chunk['metadata']['original_chunk_count'] = 2
-                        result.append(merged_chunk)
-                        i += 2  # 跳过下一个chunk
-                        logger.debug(f"合并小chunk: {content_len} + {len(next_content)} = {len(merged_content)}")
-                        continue
-                
-                # 无法合并，保留但标记为小chunk
-                current_chunk['metadata']['is_small_chunk'] = True
-                current_chunk['metadata']['chunk_size'] = content_len
-                logger.warning(f"保留小chunk（无法合并）: {content_len} 字符，内容: {content[:50]}...")
-                result.append(current_chunk)
-            else:
-                # chunk大小正常，直接添加
-                result.append(current_chunk)
-            
-            i += 1
-        
+                logger.debug(f"过滤无效内容: {c[:50]}...")
+
         return result
-    
-    def split_markdown(self, text: str) -> List[Dict]:
-        """
-        切分Markdown格式的法律条文
-        Args:
-            text: Markdown格式的文本
-        Returns:
-            [{"content": "...", "metadata": {"header_1": "...", "header_2": "..."}}, ...]
-        """
+
+    def _split_by_legal_recursive(self, text: str) -> List[Dict]:
+        """使用法律递归切分器"""
+        text = text or ""
         if not text.strip():
             return []
-        
-        try:
-            chunks = self.markdown_splitter.split_text(text)
-            result = []
-            for chunk in chunks:
-                content = chunk.page_content.strip()
-                if content:  # 只检查非空，有效性检查在统一过滤中处理
-                    result.append(self._normalize_chunk(
-                        content=content,
-                        metadata=chunk.metadata.copy()
-                    ))
-            return result
-        except Exception as e:
-            # 如果Markdown切分失败，降级为普通文本切分
-            logger.warning(f"Markdown切分失败，降级为普通文本切分: {str(e)}")
-            return self.split_text(text)
-    
-    def split_text(self, text: str) -> List[Dict]:
-        """
-        普通文本切分（用于非Markdown格式）
-        Args:
-            text: 普通文本
-        Returns:
-            [{"content": "...", "metadata": {}}, ...]
-        """
-        if not text.strip():
-            return []
-        
-        chunks = self.recursive_splitter.split_text(text)
-        result = []
-        for idx, chunk in enumerate(chunks):
-            if chunk.strip():  # 只检查非空，有效性检查在统一过滤中处理
-                result.append(self._normalize_chunk(
-                    content=chunk,
-                    metadata={"chunk_index": idx}
-                ))
-        return result
-    
-    def split_by_legal_recursive(self, text: str) -> List[Dict]:
-        """
-        使用法律条文专用的递归切分器切分
-        该方法充分利用了 legal_recursive_splitter 的配置，会自动在条款边界处切分
-        
-        Args:
-            text: 要切分的文本
-        Returns:
-            [{"content": "...", "metadata": {}}, ...]
-        """
-        if not text.strip():
-            return []
-        
-        # 如果文本本身不超过chunk_size，直接返回
+
         if len(text) <= self.chunk_size:
-            return [self._normalize_chunk(text, {})]
-        
-        # 使用法律条文递归切分器（已配置条款边界分隔符）
-        chunks = self.legal_recursive_splitter.split_text(text)
-        result = []
-        for idx, chunk in enumerate(chunks):
-            if chunk.strip():  # 只检查非空，有效性检查在统一过滤中处理
-                result.append(self._normalize_chunk(
-                    content=chunk,
-                    metadata={"chunk_index": idx, "split_method": "legal_recursive"}
-                ))
-        return result
-    
+            return [self._normalize_chunk(text, {"split_method": "legal_recursive"})]
+
+        parts = self.legal_recursive_splitter.split_text(text)
+        out: List[Dict] = []
+        for idx, p in enumerate(parts):
+            if p.strip():
+                out.append(
+                    self._normalize_chunk(
+                        p,
+                        {
+                            "chunk_index": idx,
+                            "split_method": "legal_recursive",
+                        },
+                    )
+                )
+        return out
+
+    def _split_by_article(self, text: str, base_metadata: Dict) -> List[Dict]:
+        """
+        按“第X条”切分成一条一条
+        语义参考 demo_split_law_constitution._split_by_article
+        """
+        # 兼容全角/半角空格
+        pattern = re.compile(r"(第\S*条[ 　])")
+        parts = pattern.split(text or "")
+
+        chunks: List[Dict] = []
+
+        # parts 结构: [前言, "第一条 ", 第一条内容, "第二条 ", 第二条内容, ...]
+        prefix = parts[0].strip() if parts else ""
+        if prefix:
+            md = base_metadata.copy()
+            md["split_method"] = "article_preface"
+            chunks.append(self._normalize_chunk(prefix, md))
+
+        for i in range(1, len(parts), 2):
+            title = parts[i].strip()                  # 例如 "第一条"
+            body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+            if not body:
+                continue
+
+            content = f"{title} {body}".strip()
+            md = base_metadata.copy()
+            md.update(
+                {
+                    "article_title": title,
+                    "split_method": "article",
+                }
+            )
+            chunks.append(self._normalize_chunk(content, md))
+
+        return chunks
+
+    def _split_markdown(self, text: str) -> List[Dict]:
+        """
+        Markdown：
+        1) 先按标题（宪法名、章节名）切
+        2) 每个章节内部再按“第X条”切成条文
+        3) 对极长条文再用递归规则细分
+        """
+        if not (text or "").strip():
+            return []
+
+        # 1) Markdown 标题切分
+        docs = self.markdown_splitter.split_text(text)
+        article_level_chunks: List[Dict] = []
+
+        for d in docs:
+            c = (d.page_content or "").strip()
+            if not c:
+                continue
+
+            base_md = d.metadata.copy()
+
+            # 如果这一块里包含“第X条”，就按条文再拆
+            if re.search(r"第\S*条", c):
+                article_chunks = self._split_by_article(c, base_md)
+                article_level_chunks.extend(article_chunks)
+            else:
+                # 否则保持整块
+                article_level_chunks.append(self._normalize_chunk(c, base_md))
+
+        # 2) 对过长的条文再用法律递归规则细分（一般用不到，但保底）
+        refined: List[Dict] = []
+        for ch in article_level_chunks:
+            content = (ch.get("content") or "").strip()
+            if len(content) <= self.chunk_size:
+                refined.append(ch)
+                continue
+
+            subs = self._split_by_legal_recursive(content)
+            for sub in subs:
+                md = ch.get("metadata", {}).copy()
+                md.update(sub.get("metadata", {}))
+                md["is_sub_chunk"] = True
+                refined.append(
+                    {
+                        "content": sub["content"],
+                        "metadata": md,
+                    }
+                )
+
+        return refined
+
+    # ===== 对外兼容方法 =====
+
+    def split_markdown(self, text: str) -> List[Dict]:
+        """保持方法名兼容，直接复用新 Markdown 流程（不追加统一元数据）"""
+        return self._split_markdown(text)
+
+    def split_text(self, text: str) -> List[Dict]:
+        """普通文本切分：使用法律递归规则"""
+        return self._split_by_legal_recursive(text)
+
+    def split_by_legal_recursive(self, text: str) -> List[Dict]:
+        """向后兼容旧方法名"""
+        return self._split_by_legal_recursive(text)
+
     def split_by_article_boundary(self, text: str) -> List[str]:
         """
         按条款边界切分文本（向后兼容方法）
-        注意：此方法返回 List[str]，内部使用 split_by_legal_recursive 实现
-        
-        Args:
-            text: 要切分的文本
-        Returns:
-            文本块列表（字符串列表）
+        返回 List[str]
         """
-        chunks = self.split_by_legal_recursive(text)
-        # 提取 content 字段以保持向后兼容
-        return [chunk['content'] for chunk in chunks]
-    
+        base_metadata: Dict[str, Any] = {}
+        chunks = self._split_by_article(text, base_metadata)
+        return [c["content"] for c in chunks]
+
     def split_long_chunks(
-        self, 
-        chunks: List[Dict], 
-        max_chunk_size: int = None
+        self,
+        chunks: List[Dict],
+        max_chunk_size: int | None = None,
     ) -> List[Dict]:
         """
-        如果文本块过长，进一步切分
+        如果已有的文本块过长，进一步切分
         对于法律条文，优先在条款边界（"第X条"）处切分
-        
-        Args:
-            chunks: 已切分的文本块列表
-            max_chunk_size: 最大块大小（默认使用self.chunk_size）
-        Returns:
-            重新切分后的文本块列表
         """
         if max_chunk_size is None:
             max_chunk_size = self.chunk_size
-        
-        result = []
+
+        result: List[Dict] = []
         for chunk in chunks:
-            content = chunk.get('content', '').strip()
+            content = (chunk.get("content") or "").strip()
             if not content:
                 continue
-            
+
             if len(content) <= max_chunk_size:
-                # chunk大小正常，直接添加（后续统一过滤）
                 result.append(chunk)
             else:
-                # 进一步切分：直接使用 legal_recursive_splitter
-                # 因为它已经配置了条款边界分隔符，会自动在合适的地方切分
-                sub_chunks = self.split_by_legal_recursive(content)
-                
-                # 保留原始元数据
-                for sub_chunk in sub_chunks:
-                    merged_metadata = chunk['metadata'].copy()
-                    merged_metadata.update(sub_chunk['metadata'])
-                    merged_metadata['is_sub_chunk'] = True
-                    result.append({
-                        "content": sub_chunk['content'],
-                        "metadata": merged_metadata
-                    })
-        
+                # 直接按法律递归规则再切一遍
+                sub_chunks = self._split_by_legal_recursive(content)
+                for sub in sub_chunks:
+                    merged_metadata = chunk.get("metadata", {}).copy()
+                    merged_metadata.update(sub.get("metadata", {}))
+                    merged_metadata["is_sub_chunk"] = True
+                    result.append(
+                        {
+                            "content": sub["content"],
+                            "metadata": merged_metadata,
+                        }
+                    )
+
         return result
-    
+
     def split_with_metadata(
-        self, 
-        text: str, 
-        source_name: str, 
-        **extra_metadata
+        self,
+        text: str,
+        source_name: str,
+        **extra_metadata: Any,
     ) -> List[Dict]:
         """
-        切分文本并添加元数据（主入口方法）
-        
-        Args:
-            text: 要切分的文本
-            source_name: 来源文件名
-            **extra_metadata: 额外的元数据字段
-        Returns:
-            [{"content": "...", "metadata": {...}}, ...]
+        主入口：返回 [{"content": "...", "metadata": {...}}, ...]
+        切分逻辑与 problem_test/demo_split_law_constitution.py 一致
         """
-        if not text.strip():
+        if not (text or "").strip():
             return []
-        
-        # 判断是否为Markdown格式
-        is_markdown = text.strip().startswith("#") or re.search(r'^#{1,3}\s+', text, re.MULTILINE)
-        
+
+        # 判断是否为 Markdown（以 # 开头 或 存在多级标题）
+        is_markdown = text.strip().startswith("#")
+        if not is_markdown:
+            if re.search(r"^#{1,4}\s+", text, re.MULTILINE):
+                is_markdown = True
+
         if is_markdown:
-            # Markdown格式：先使用Markdown切分器
-            chunks = self.split_markdown(text)
-            
-            # 对超长块进一步切分
-            chunks = self.split_long_chunks(chunks, max_chunk_size=self.chunk_size)
+            chunks = self._split_markdown(text)
         else:
-            # 普通文本：使用法律条文递归切分器（已配置条款边界分隔符）
-            chunks = self.split_by_legal_recursive(text)
-        
-        # 统一过滤和合并策略
-        chunks = self._filter_and_merge_chunks(chunks)
-        
-        # 添加统一的元数据
-        for chunk in chunks:
-            chunk['metadata'].update({
-                "source_name": source_name,
-                "source_type": "legal",
-                **extra_metadata
-            })
-        
+            chunks = self._split_by_legal_recursive(text)
+
+        # 统一过滤无效内容
+        chunks = self._filter_chunks(chunks)
+
+        # 统一追加元数据
+        for ch in chunks:
+            ch.setdefault("metadata", {})
+            ch["metadata"].update(
+                {
+                    "source_name": source_name,
+                    "source_type": "legal",
+                    **extra_metadata,
+                }
+            )
+
         return chunks

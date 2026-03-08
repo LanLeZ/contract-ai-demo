@@ -14,7 +14,7 @@ class LawTextSplitter:
     保持向后兼容，现有代码无需修改
     """
     
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 100):
+    def __init__(self, chunk_size: int = 200, chunk_overlap: int = 60):
         """
         初始化文本切分器
         注意：chunk_size 参数仅用于法律条文，合同使用固定值 200
@@ -22,18 +22,18 @@ class LawTextSplitter:
             chunk_size: 每个文本块的最大字符数（用于法律条文）
             chunk_overlap: 文本块之间的重叠字符数（用于法律条文）
         """
-        # 法律条文切分器（使用传入的参数）
+        # 法律条文切分器（使用传入的参数，默认 200 / 60）
         self.legal_splitter = LegalTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            min_chunk_size=50
+            min_chunk_size=1
         )
         
         # 合同切分器（使用固定参数）
         self.contract_splitter = ContractTextSplitter(
             chunk_size=200,
             chunk_overlap=60,
-            min_chunk_size=50
+            min_chunk_size=1
         )
         
         # 保持向后兼容：保存原始参数

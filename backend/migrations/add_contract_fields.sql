@@ -33,3 +33,14 @@ ALTER TABLE contracts ADD COLUMN chunk_count INTEGER;
 
 
 
+
+
+
+
+
+
+
+
+
+
+

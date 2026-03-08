@@ -1,7 +1,8 @@
 import json
 import logging
 import os
-from typing import List, Literal, Tuple
+import re
+from typing import Any, Dict, List, Literal, Tuple
 
 from dotenv import load_dotenv
 
@@ -174,5 +175,275 @@ class QwenChatClient:
         ]
 
         return self.chat(messages, temperature=temperature)
+
+
+def _analyze_clauses_by_type(
+    client: QwenChatClient,
+    clauses: List[Dict[str, Any]],
+    change_type: str,
+    left_contract: Any,
+    right_contract: Any,
+) -> Dict[str, Dict[str, str]]:
+    """
+    按类型批量分析条款差异，返回 {clause_marker: {importance, explanation}} 的映射。
+    
+    Args:
+        client: QwenChatClient 实例
+        clauses: 同一类型的差异条款列表
+        change_type: "delete" | "add" | "alter"
+        left_contract: 左侧合同对象
+        right_contract: 右侧合同对象
+    
+    Returns:
+        {clause_marker: {"importance": "normal/vital", "explanation": "..."}}
+    """
+    if not clauses:
+        return {}
+    
+    # 构建批量分析的 prompt
+    if change_type == "delete":
+        type_desc = "删除（该条款在左侧合同中存在，但在右侧合同中被删除）"
+        clauses_text = "\n\n".join([
+            f"条款编号：{c.get('clause_marker', '')}\n"
+            f"被删除的条款内容：\n{c.get('left_text', '')}"
+            for c in clauses
+        ])
+        user_prompt = (
+            f"左侧合同文件名：{getattr(left_contract, 'filename', None)}\n"
+            f"右侧合同文件名：{getattr(right_contract, 'filename', None)}\n\n"
+            f"以下是多个被删除的条款（变更类型：{type_desc}）：\n\n"
+            f"{clauses_text}\n\n"
+            f"请为每个条款分析：\n"
+            f"1. 该条款的重要性（importance）：normal（一般）或 vital（重要）\n"
+            f"2. 删除该条款可能带来的风险或影响（explanation）：简要说明对乙方的潜在影响\n\n"
+            f"请以 JSON 格式返回，格式如下（clause_marker 作为 key）：\n"
+            f'{{\n'
+            f'  "条款编号1": {{"importance": "normal/vital", "explanation": "风险说明"}},\n'
+            f'  "条款编号2": {{"importance": "normal/vital", "explanation": "风险说明"}}\n'
+            f'}}\n'
+        )
+    elif change_type == "add":
+        type_desc = "新增（该条款在右侧合同中新增，左侧合同中没有）"
+        clauses_text = "\n\n".join([
+            f"条款编号：{c.get('clause_marker', '')}\n"
+            f"新增的条款内容：\n{c.get('right_text', '')}"
+            for c in clauses
+        ])
+        user_prompt = (
+            f"左侧合同文件名：{getattr(left_contract, 'filename', None)}\n"
+            f"右侧合同文件名：{getattr(right_contract, 'filename', None)}\n\n"
+            f"以下是多个新增的条款（变更类型：{type_desc}）：\n\n"
+            f"{clauses_text}\n\n"
+            f"请为每个条款分析：\n"
+            f"1. 该条款的重要性（importance）：normal（一般）或 vital（重要）\n"
+            f"2. 新增该条款可能带来的风险或影响（explanation）：简要说明对乙方的潜在影响\n\n"
+            f"请以 JSON 格式返回，格式如下（clause_marker 作为 key）：\n"
+            f'{{\n'
+            f'  "条款编号1": {{"importance": "normal/vital", "explanation": "风险说明"}},\n'
+            f'  "条款编号2": {{"importance": "normal/vital", "explanation": "风险说明"}}\n'
+            f'}}\n'
+        )
+    else:  # alter
+        type_desc = "修改（该条款在两侧合同中都存在，但内容有差异）"
+        clauses_text = "\n\n".join([
+            f"条款编号：{c.get('clause_marker', '')}\n"
+            f"左侧合同内容：\n{c.get('left_text', '')}\n\n"
+            f"右侧合同内容：\n{c.get('right_text', '')}"
+            for c in clauses
+        ])
+        user_prompt = (
+            f"左侧合同文件名：{getattr(left_contract, 'filename', None)}\n"
+            f"右侧合同文件名：{getattr(right_contract, 'filename', None)}\n\n"
+            f"以下是多个被修改的条款（变更类型：{type_desc}）：\n\n"
+            f"{clauses_text}\n\n"
+            f"请为每个条款分析，首先判断差异是否存在实质性差异：\n\n"
+            f"【实质性差异判断标准】\n"
+            f"- 如果只是同义词替换或表达方式变化（如\"工资\"改为\"报酬\"、\"甲方\"改为\"委托方\"），"
+            f"  没有改变权利义务关系、支付方式、时间地点等关键要素，则属于 normal（一般）级别。\n"
+            f"- 如果改变了权利义务关系、支付方式、时间地点、责任范围等关键要素"
+            f"  （如\"转账\"改为\"现金支付\"、\"30天\"改为\"60天\"、\"不可抗力\"改为\"可抗力\"），"
+            f"  则属于 vital（重要）级别。\n\n"
+            f"请为每个条款输出：\n"
+            f"1. 该条款的重要性（importance）：normal（一般）或 vital（重要）\n"
+            f"   - 请先判断是否存在实质性差异，再确定 importance 级别\n"
+            f"2. 内容修改可能带来的风险或影响（explanation）：简要说明对乙方的潜在影响\n\n"
+            f"请以 JSON 格式返回，格式如下（clause_marker 作为 key）：\n"
+            f'{{\n'
+            f'  "条款编号1": {{"importance": "normal/vital", "explanation": "风险说明"}},\n'
+            f'  "条款编号2": {{"importance": "normal/vital", "explanation": "风险说明"}}\n'
+            f'}}\n'
+        )
+    
+    system_prompt = (
+        "你是一名精通中国合同与民商事法律的合同对比与风险分析助手。\n"
+        "请分析多个合同条款的差异，首先判断差异是否存在实质性差异，然后评估每个条款的重要性并给出风险提示。\n"
+        "请用中文输出，语言简洁专业。必须严格按照要求的 JSON 格式返回。"
+    )
+    
+    try:
+        response = client.chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
+        
+        # 解析 JSON 响应
+        if response:
+            # 尝试提取 JSON 部分
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    # 验证并转换格式
+                    result = {}
+                    for marker, analysis in parsed.items():
+                        if isinstance(analysis, dict):
+                            result[str(marker)] = {
+                                "importance": analysis.get("importance", "normal"),
+                                "explanation": analysis.get("explanation", ""),
+                            }
+                        elif isinstance(analysis, str):
+                            # 如果直接是字符串，尝试解析
+                            result[str(marker)] = {
+                                "importance": "normal",
+                                "explanation": analysis,
+                            }
+                    return result
+                except json.JSONDecodeError:
+                    logger.warning(f"解析 {change_type} 类型条款的 LLM 响应 JSON 失败: {response[:200]}")
+    except Exception:
+        logger.exception(f"批量分析 {change_type} 类型条款失败")
+    
+    # 解析失败，返回默认值
+    return {c.get("clause_marker", ""): {"importance": "normal", "explanation": ""} for c in clauses}
+
+
+def attach_contract_compare_llm_analysis(
+    base_result: Dict[str, Any],
+    left_contract: Any,
+    right_contract: Any,
+) -> None:
+    """
+    合同对比场景下的统一 LLM 差异分析入口。
+    
+    优化：按 change_type 分类批量调用 LLM，而不是为每个条款单独调用。
+    为每个差异条款生成 importance 和 explanation。
+
+    说明：
+    - 仅依赖于 QwenChatClient，不直接依赖 SQLAlchemy 模型类型，避免循环导入；
+    - 调用失败（包括 dashscope 未安装 / API Key 缺失 / LLM 报错）时会静默降级，不影响基础对比结果。
+    """
+    try:
+        client = QwenChatClient()
+    except Exception:
+        logger.exception("初始化 QwenChatClient 失败，跳过合同差异 LLM 分析")
+        return
+
+    # 使用 all_differences（新格式，由 contract_compare.py 统一生成）
+    all_differences: List[Dict[str, Any]] = base_result.get("all_differences", [])
+    
+    if not all_differences:
+        logger.info("没有差异条款需要分析")
+        return
+    
+    # 按 change_type 分类，并过滤掉没有文本内容的条款（这些条款无法进行有效分析）
+    clauses_by_type: Dict[str, List[Dict[str, Any]]] = {
+        "delete": [],
+        "add": [],
+        "alter": [],
+    }
+    
+    # 记录没有文本的条款，直接给默认值
+    clauses_without_text: List[Dict[str, Any]] = []
+    
+    for clause_data in all_differences:
+        change_type = clause_data.get("change_type", "alter")
+        
+        # 检查是否有文本内容
+        if change_type == "delete":
+            has_text = bool(clause_data.get("left_text", "").strip())
+        elif change_type == "add":
+            has_text = bool(clause_data.get("right_text", "").strip())
+        else:  # alter
+            has_text = bool(clause_data.get("left_text", "").strip()) or bool(clause_data.get("right_text", "").strip())
+        
+        if has_text and change_type in clauses_by_type:
+            clauses_by_type[change_type].append(clause_data)
+        else:
+            # 没有文本的条款，直接给默认值
+            clauses_without_text.append(clause_data)
+    
+    # 为没有文本的条款设置默认值
+    all_analysis_results: Dict[str, Dict[str, str]] = {}
+    for clause in clauses_without_text:
+        marker = clause.get("clause_marker", "")
+        all_analysis_results[marker] = {
+            "importance": "normal",
+            "explanation": "该条款缺少文本内容，无法进行详细分析。",
+        }
+    
+    # 按类型批量调用 LLM（只分析有文本内容的条款）
+    for change_type, clauses in clauses_by_type.items():
+        if not clauses:
+            continue
+        
+        try:
+            analysis_results = _analyze_clauses_by_type(
+                client=client,
+                clauses=clauses,
+                change_type=change_type,
+                left_contract=left_contract,
+                right_contract=right_contract,
+            )
+            all_analysis_results.update(analysis_results)
+        except Exception:
+            logger.exception(f"批量分析 {change_type} 类型条款失败，使用默认值")
+            # 为失败的条款设置默认值
+            for clause in clauses:
+                marker = clause.get("clause_marker", "")
+                if marker not in all_analysis_results:
+                    all_analysis_results[marker] = {"importance": "normal", "explanation": ""}
+    
+    # 将分析结果合并到条款数据中
+    for clause_data in all_differences:
+        marker = clause_data.get("clause_marker", "")
+        analysis = all_analysis_results.get(marker, {})
+        clause_data["importance"] = analysis.get("importance", "normal")
+        clause_data["explanation"] = analysis.get("explanation", "")
+    
+    # 更新 base_result，将分析结果写回原始数据结构
+    base_result["all_differences"] = all_differences
+    
+    # 更新 only_in_left（字典列表格式）
+    only_in_left = base_result.get("only_in_left", [])
+    if isinstance(only_in_left, list):
+        for clause in only_in_left:
+            if isinstance(clause, dict):
+                marker = clause.get("clause_marker", "")
+                analysis = all_analysis_results.get(marker, {})
+                clause["importance"] = analysis.get("importance", "normal")
+                clause["explanation"] = analysis.get("explanation", "")
+    
+    # 更新 only_in_right（字典列表格式）
+    only_in_right = base_result.get("only_in_right", [])
+    if isinstance(only_in_right, list):
+        for clause in only_in_right:
+            if isinstance(clause, dict):
+                marker = clause.get("clause_marker", "")
+                analysis = all_analysis_results.get(marker, {})
+                clause["importance"] = analysis.get("importance", "normal")
+                clause["explanation"] = analysis.get("explanation", "")
+    
+    # 更新 changed_clauses，为它们添加 importance 和 explanation
+    changed_clauses = base_result.get("changed_clauses", [])
+    if isinstance(changed_clauses, list):
+        for changed_clause in changed_clauses:
+            if isinstance(changed_clause, dict):
+                marker = changed_clause.get("clause_marker", "")
+                analysis = all_analysis_results.get(marker, {})
+                changed_clause["importance"] = analysis.get("importance", "normal")
+                changed_clause["explanation"] = analysis.get("explanation", "")
 
 

@@ -11,8 +11,8 @@ from app.services.vector_store import VectorStore
 
 router = APIRouter()
 
-# 初始化向量库
-vector_store = VectorStore()
+# 初始化向量库，使用新的 collection 存放基于最新切分逻辑的向量数据
+vector_store = VectorStore(collection_name="legal_contracts_v2")
 
 
 @router.post("/", response_model=schemas.SearchResponse)
@@ -113,6 +113,10 @@ async def search_by_contract(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"搜索失败: {str(e)}"
         )
+
+
+
+
 
 
 

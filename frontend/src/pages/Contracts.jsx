@@ -181,7 +181,7 @@ const Contracts = () => {
 
   const handleUpload = async (file) => {
     // 验证文件类型
-    const allowedTypes = ['.pdf', '.docx', '.md', '.markdown', '.txt', '.png', '.jpg', '.jpeg']
+    const allowedTypes = ['.pdf', '.docx', '.txt', '.png', '.jpg', '.jpeg']
     const fileExt = getFileExt(file?.name)
     
     if (!allowedTypes.includes(fileExt)) {

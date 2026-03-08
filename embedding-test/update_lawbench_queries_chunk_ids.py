@@ -25,11 +25,18 @@
 
 注意：
 - 为避免覆盖原始标注文件，默认输出为 queries_lawbench_3-2_chunk_ids.jsonl
-- 如果某些 (法律, 条款) 在 chunks 中找不到对应的 chunk，会打印警告，并保留原始条款编号
+- 如果某些 (法律, 条款) 在 chunks 中找不到对应的 chunk，会打印警告
+- 无法映射的条文不会保留在 relevant_chunk_ids 中，只保留成功映射的 chunk_id
+- 如果某条查询的所有条文都无法映射，relevant_chunk_ids 将为空数组 []，该条查询会被跳过，不写入输出文件
+
+重要说明：
+- 本脚本**不会对 queries 去重**：不同 query 即使命中相同法条，也会全部保留。
+- 这里“重复”的概念只用于构建映射表时：同一 (法律, 条款) 若在 chunks 里出现多个候选 chunk_id，会保留第一个并打印警告，避免映射不稳定。
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -87,10 +94,11 @@ def build_law_article_to_chunk_id_mapping(chunks_path: Path) -> Dict[LawArticleK
 
             for article in articles:
                 key: LawArticleKey = (law_normalized, article)
-                # 如果已经存在映射且 chunk_id 不同，打印一次警告，但保留第一个映射
+                # 注意：这不是对 queries 去重，而是映射表去重。
+                # 如果同一 (法律, 条款) 在 chunks 中对应多个不同 chunk_id，会打印一次警告并保留第一个映射，避免映射表被覆盖导致结果不稳定。
                 if key in mapping and mapping[key] != chunk_id:
                     print(
-                        f"⚠️  条款重复映射: 法律={law_normalized}, 条款={article}, "
+                        f"⚠️  chunks 中同一(法律,条款)出现多个 chunk_id，已保留第一个: 法律={law_normalized}, 条款={article}, "
                         f"已有={mapping[key]}, 新={chunk_id}"
                     )
                     continue
@@ -126,6 +134,7 @@ def update_lawbench_queries_file(
     """
     updated_queries = []
     not_found_keys: Dict[LawArticleKey, int] = {}
+    skipped_count = 0  # 记录因 relevant_chunk_ids 为空而被跳过的查询数量
 
     with queries_path.open("r", encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
@@ -144,8 +153,9 @@ def update_lawbench_queries_file(
             original_ids = query.get("relevant_chunk_ids", []) or []
 
             if not law_normalized or not original_ids:
-                # 没有法律名或没有条款编号的记录，直接原样保留
-                updated_queries.append(query)
+                # 没有法律名或没有条款编号（relevant_chunk_ids 为空/缺失）的记录：直接跳过
+                # 评测集只保留带有明确 ground-truth chunk_id 的样本
+                skipped_count += 1
                 continue
 
             new_chunk_ids = []
@@ -155,12 +165,19 @@ def update_lawbench_queries_file(
                 if chunk_id:
                     new_chunk_ids.append(chunk_id)
                 else:
-                    # 找不到映射时，保留原值并记录统计
-                    new_chunk_ids.append(article)
+                    # 找不到映射时，不保留原始条文编号，只记录统计
+                    # 这样 relevant_chunk_ids 中只包含成功映射的 chunk_id
                     not_found_keys[key] = not_found_keys.get(key, 0) + 1
 
+            # 更新 relevant_chunk_ids（可能为空数组，表示所有条文都无法映射）
+            # 同时过滤掉空字符串等无效 chunk_id
+            new_chunk_ids = [cid for cid in new_chunk_ids if isinstance(cid, str) and cid.strip()]
             query["relevant_chunk_ids"] = new_chunk_ids
-            updated_queries.append(query)
+            # 如果 relevant_chunk_ids 为空，跳过该条查询，不写入输出文件
+            if new_chunk_ids:
+                updated_queries.append(query)
+            else:
+                skipped_count += 1
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
@@ -168,6 +185,8 @@ def update_lawbench_queries_file(
             f.write(json.dumps(query, ensure_ascii=False) + "\n")
 
     print(f"\n✅ 更新完成！共处理 {len(updated_queries)} 条 LawBench 查询")
+    if skipped_count > 0:
+        print(f"⚠️  跳过 {skipped_count} 条查询（relevant_chunk_ids 为空）")
     if not_found_keys:
         print(f"⚠️  有 {len(not_found_keys)} 个 (法律, 条款) 未找到对应 chunk，示例：")
         for (law, article), cnt in list(not_found_keys.items())[:20]:
@@ -177,12 +196,41 @@ def update_lawbench_queries_file(
 
 
 def main() -> None:
-    # 默认使用 config.CHUNKS_PATH（当前指向 lawbench_laws_chunks.jsonl）
-    chunks_path = Path(CHUNKS_PATH).resolve()
-    # LawBench 匹配后的原始 queries 文件
-    queries_path = BASE_DIR / "eval" / "queries_lawbench_3-2_matched.jsonl"
-    # 输出：带真实 chunk_id 的 LawBench queries
-    output_path = BASE_DIR / "eval" / "queries_lawbench_3-2_chunk_ids.jsonl"
+    """
+    默认行为：
+    - chunks_path: 使用 config.CHUNKS_PATH（通常是 embedding-test/data/lawbench_laws_chunks.jsonl）
+    - queries_path: embedding-test/eval/queries_lawbench_3-2.jsonl
+    - output_path: embedding-test/eval/queries_lawbench_3-2_chunk_ids.jsonl（可通过参数覆盖）
+
+    强烈建议：
+    - 如果你在做不同 chunkSize 的评测（例如 chunkSize200/chunkSize800），务必传入对应的 chunks 文件；
+      否则会出现 chunk_id/#index 不一致，导致部分条款映射失败，从而让输出样本数变少。
+    """
+
+    parser = argparse.ArgumentParser(description="LawBench 查询条款编号 -> chunk_id 映射脚本")
+    parser.add_argument(
+        "--chunks-path",
+        type=str,
+        default=str(CHUNKS_PATH),
+        help="chunks JSONL 文件路径（默认使用 config.CHUNKS_PATH）",
+    )
+    parser.add_argument(
+        "--queries-path",
+        type=str,
+        default=str(BASE_DIR / "eval" / "queries_lawbench_3-2.jsonl"),
+        help="输入 queries JSONL 文件路径（默认 embedding-test/eval/queries_lawbench_3-2.jsonl）",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default=str(BASE_DIR / "chunkSize200_eval" / "queries_lawbench_3-2_chunk_ids.jsonl"),
+        help="输出 queries JSONL 文件路径（默认 embedding-test/chunkSize200_eval/queries_lawbench_3-2_chunk_ids.jsonl）",
+    )
+    args = parser.parse_args()
+
+    chunks_path = Path(args.chunks_path).resolve()
+    queries_path = Path(args.queries_path).resolve()
+    output_path = Path(args.output_path).resolve()
 
     print("LawBench 查询条款编号 -> chunk_id 映射脚本")
     print("=" * 80)
@@ -209,6 +257,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
 
 
 

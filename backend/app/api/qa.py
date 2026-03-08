@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 初始化服务（与 documents.py 中保持一致的风格）
-vector_store = VectorStore()
+# 使用新的 collection 存放基于最新切分逻辑的向量数据
+vector_store = VectorStore(collection_name="legal_contracts_v2")
 qwen_client = QwenChatClient()
 
 

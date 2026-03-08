@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Button, Card, Space, Typography, message } from 'antd'
-import { LogoutOutlined, UserOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons'
+import { LogoutOutlined, UserOutlined, FileTextOutlined, SettingOutlined, DiffOutlined } from '@ant-design/icons'
 import { useAuth } from '../hooks/useAuth'
 import { authService } from '../services/auth'
 
@@ -88,11 +88,20 @@ const Dashboard = () => {
                 >
                   合同管理
                 </Button>
-                <Text type="secondary">后续功能开发中：</Text>
+                <Button
+                  type="default"
+                  size="large"
+                  icon={<DiffOutlined />}
+                  onClick={() => navigate('/compare')}
+                  block
+                >
+                  合同对比
+                </Button>
+                <Text type="secondary">更多功能规划中：</Text>
                 <ul>
-                  <li>智能问答</li>
-                  <li>历史对话记录</li>
-                  <li>实体关系抽取</li>
+                  <li>智能问答增强视图</li>
+                  <li>历史对话记录分析</li>
+                  <li>实体关系与知识图谱深度分析</li>
                 </ul>
               </Space>
             </Card>

@@ -19,6 +19,11 @@ class User(Base):
     # 关系
     contracts = relationship("Contract", back_populates="owner")
     conversations = relationship("Conversation", back_populates="user")
+    contract_compares = relationship(
+        "ContractCompare",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Contract(Base):
@@ -43,6 +48,48 @@ class Contract(Base):
         "KnowledgeTriple",
         back_populates="contract",
         cascade="all, delete-orphan",
+    )
+    chunks = relationship(
+        "ContractChunk",
+        back_populates="contract",
+        cascade="all, delete-orphan",
+    )
+
+
+class ContractCompare(Base):
+    """合同对比结果模型"""
+    __tablename__ = "contract_compares"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 归属用户
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # 被对比的两份合同
+    left_contract_id = Column(Integer, ForeignKey("contracts.id"), nullable=False)
+    right_contract_id = Column(Integer, ForeignKey("contracts.id"), nullable=False)
+
+    # 对比状态：pending / running / success / failed
+    status = Column(String(32), nullable=False, default="success")
+
+    # 对比结果，使用 JSON 字符串存储结构化结果
+    result_json = Column(Text, nullable=True)
+
+    # 若失败，记录错误信息
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 关系
+    user = relationship("User", back_populates="contract_compares")
+    left_contract = relationship(
+        "Contract",
+        foreign_keys=[left_contract_id],
+    )
+    right_contract = relationship(
+        "Contract",
+        foreign_keys=[right_contract_id],
     )
 
 
@@ -87,3 +134,36 @@ class KnowledgeTriple(Base):
 
     # 关系
     contract = relationship("Contract", back_populates="kg_triples")
+
+
+class ContractChunk(Base):
+    """合同切分片段模型（条款级）"""
+    __tablename__ = "contract_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 所属合同
+    contract_id = Column(
+        Integer,
+        ForeignKey("contracts.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # 在当前合同中的顺序索引（从 0 开始）
+    chunk_index = Column(Integer, nullable=False)
+
+    # 条款编号/标记，例如 "1.1"、"4.3"、"a1" 等
+    clause_marker = Column(String(64), nullable=True, index=True)
+
+    # 片段文本内容（一个条款或前言等逻辑单元）
+    content = Column(Text, nullable=False)
+
+    # 冗余信息，便于检索/调试
+    source_name = Column(String(255), nullable=True)
+    contract_type = Column(String(50), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 关系
+    contract = relationship("Contract", back_populates="chunks")

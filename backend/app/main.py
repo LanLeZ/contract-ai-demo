@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, documents, search, qa, kg
+from app.api import auth, documents, search, qa, kg, compare
 from app.database import engine, Base
 
 import logging
@@ -42,6 +42,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["文档管�
 app.include_router(search.router, prefix="/api/search", tags=["向量搜索"])
 app.include_router(qa.router, prefix="/api", tags=["智能问答"])
 app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
+app.include_router(compare.router, prefix="/api", tags=["合同对比"])
 
 @app.get("/")
 async def root():

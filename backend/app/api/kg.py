@@ -83,3 +83,14 @@ async def get_contract_kg(
     return triples
 
 
+
+
+
+
+
+
+
+
+
+
+

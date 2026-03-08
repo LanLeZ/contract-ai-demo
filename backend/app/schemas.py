@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=72, description="密码长度必须在6-72字符之间")
+    password: str = Field(..., min_length=8, max_length=72, description="密码长度必须在8-72字符之间")
     
     @field_validator('password')
     @classmethod
@@ -84,6 +84,48 @@ class ContractResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ContractCompareRequest(BaseModel):
+    """创建合同对比请求"""
+    left_contract_id: int = Field(..., description="左侧合同 ID")
+    right_contract_id: int = Field(..., description="右侧合同 ID")
+
+
+class ContractCompareSummary(BaseModel):
+    """合同对比概要信息（用于列表）"""
+    id: int
+    # 历史数据中可能存在部分字段为 NULL 的情况，这里统一放宽为可选，避免响应校验失败导致 422
+    left_contract_id: int | None = None
+    right_contract_id: int | None = None
+    status: str | None = None
+    # 允许历史数据中 created_at 为空
+    created_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ContractCompareDetail(BaseModel):
+    """单次合同对比详情"""
+    id: int
+    # 同样放宽这些字段为可选，以兼容历史脏数据
+    left_contract_id: int | None = None
+    right_contract_id: int | None = None
+    status: str | None = None
+    # 某些情况下（例如老数据或未刷新 server_default），created_at 可能为 None
+    created_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: Dict[str, Any] | None = Field(
+        default=None,
+        description="结构化对比结果（从数据库的 result_json 反序列化）",
+    )
+
+
+class ContractCompareListResponse(BaseModel):
+    """合同对比历史列表响应"""
+    items: List[ContractCompareSummary]
 
 
 

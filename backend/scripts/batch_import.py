@@ -26,15 +26,15 @@ def scan_markdown_files(directory: Path) -> list[Path]:
                 markdown_files.append(Path(root) / file)
     return sorted(markdown_files)
 
-def import_law_files(directory: str, source_type: str = "legal", clear_existing: bool = False):
+def import_law_files(directory: str, source_type: str = "legal", clear_existing: bool = False, collection_name: str = "legal_contracts_v2"):
     """
     业务含义：
         - 批量将法律条文（或其他 Markdown 形式的法规文档）导入到底层向量库；
-        - 这些数据作为“公共法律语料”，为所有用户的问答和合同分析提供基础知识，
+        - 这些数据作为"公共法律语料"，为所有用户的问答和合同分析提供基础知识，
           通过 metadata 中的 source_type="legal" 与用户上传合同数据进行区分。
 
     技术实现：
-        - 递归扫描指定目录下的 `.md` / `.markdown` 文件，每个文件视为一份“原始文档”；
+        - 递归扫描指定目录下的 `.md` / `.markdown` 文件，每个文件视为一份"原始文档"；
         - 使用 DocumentParser 统一解析文档内容（屏蔽具体文件格式差异）；
         - 使用 LawTextSplitter 依据 chunk_size / chunk_overlap 将长文本切分为适合向量检索的片段；
         - 调用 VectorStore.add_documents() 将片段批量写入 ChromaDB，附带 source_type / source_name 等 metadata；
@@ -44,6 +44,7 @@ def import_law_files(directory: str, source_type: str = "legal", clear_existing:
         directory: 法律条文目录路径
         source_type: 来源类型（默认 "legal"，也可用于导入模拟合同等数据）
         clear_existing: 是否在导入前清理现有集合（会删除当前集合内所有法律条文数据）
+        collection_name: 集合名称（默认 "legal_contracts_v2"，使用新的 collection）
     """
     dir_path = Path(directory)
     if not dir_path.exists():
@@ -62,21 +63,22 @@ def import_law_files(directory: str, source_type: str = "legal", clear_existing:
     
     # 初始化服务
     parser = DocumentParser()
-    splitter = LawTextSplitter()
-    vector_store = VectorStore()
+    # 使用测试验证的最佳参数：chunk_size=200, chunk_overlap=60
+    splitter = LawTextSplitter(chunk_size=200, chunk_overlap=60)
+    vector_store = VectorStore(collection_name=collection_name)
     
     # 如果指定清理，先删除现有集合
     if clear_existing:
-        print("\n🗑️  清理现有向量库集合...")
+        print(f"\n🗑️  清理现有向量库集合: {collection_name}...")
         try:
             old_count = vector_store.get_collection_count()
             vector_store.delete_collection()
             print(f"   ✅ 已删除旧集合（包含 {old_count} 个文档）")
             # 重新初始化向量库（创建新集合）
-            vector_store = VectorStore()
+            vector_store = VectorStore(collection_name=collection_name)
         except Exception as e:
             print(f"   ⚠️  清理失败（可能集合不存在）: {str(e)}")
-            vector_store = VectorStore()
+            vector_store = VectorStore(collection_name=collection_name)
     
     # 统计信息
     total_files = len(markdown_files)
@@ -200,6 +202,12 @@ def main():
         action="store_true",
         help="导入前清理现有向量库集合（删除所有法律条文数据，用户上传的合同数据不受影响）"
     )
+    parser.add_argument(
+        "--collection",
+        type=str,
+        default="legal_contracts_v2",
+        help="集合名称（默认 legal_contracts_v2，使用新的 collection）"
+    )
     
     args = parser.parse_args()
     
@@ -207,9 +215,10 @@ def main():
     print("🚀 开始批量导入法律条文")
     if args.clear:
         print("⚠️  警告：将清理现有向量库集合")
+    print(f"📦 使用集合: {args.collection}")
     print("=" * 60)
     
-    import_law_files(args.dir, args.source_type, clear_existing=args.clear)
+    import_law_files(args.dir, args.source_type, clear_existing=args.clear, collection_name=args.collection)
     
     print("\n✅ 批量导入完成！")
 
