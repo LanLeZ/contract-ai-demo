@@ -50,6 +50,8 @@ backend/chroma_db/
 # LawBench 数据集目录
 LawBench-main/
 
+.hanlp_cache_clean/
+.venv_hanlp_test/
 
 
 

@@ -113,6 +113,9 @@ def list_contract_compare_history(
                 status=row.status,
                 created_at=row.created_at,
                 finished_at=row.finished_at,
+                # 通过关系获取左右合同的文件名（如果存在）
+                left_contract_filename=getattr(row.left_contract, "filename", None),
+                right_contract_filename=getattr(row.right_contract, "filename", None),
             ),
         )
 

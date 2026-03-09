@@ -178,4 +178,3 @@ class ContractTextSplitter(BaseTextSplitter):
 
         return result
 
-

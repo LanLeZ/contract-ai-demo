@@ -1,8 +1,0 @@
-include README.md
-include requirements.txt
-
-recursive-include ltp *
-
-recursive-exclude * *.pyc
-recursive-exclude * .DS_Store
-recursive-exclude * __pycache__

@@ -103,6 +103,10 @@ class ContractCompareSummary(BaseModel):
     created_at: datetime | None = None
     finished_at: datetime | None = None
 
+    # 新增：左右合同的文件名（用于前端历史列表展示）
+    left_contract_filename: Optional[str] = None
+    right_contract_filename: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -218,12 +222,30 @@ class KGTriple(BaseModel):
     evidence: Optional[str] = None
     template_name: Optional[str] = None
     created_at: datetime
-
+    
     class Config:
         from_attributes = True
-
-
+    
+    
 class KGExtractResponse(BaseModel):
     contract_id: int
     contract_type: Optional[str] = None
     triples: List[KGTriple]
+
+
+# ====== 条款复杂度相关 Schema ======
+
+class ClauseComplexityItem(BaseModel):
+    clause_index: int
+    clause_marker: Optional[str] = None
+    clause_text: str
+    complexity_score: float
+    is_complex: bool
+    llm_plain_explanation: Optional[str] = None
+    llm_simplified_clause: Optional[str] = None
+
+
+class ContractComplexityResponse(BaseModel):
+    contract_id: int
+    threshold: float
+    clauses: List[ClauseComplexityItem]

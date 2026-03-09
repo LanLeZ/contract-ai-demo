@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, documents, search, qa, kg, compare
+from app.api import auth, documents, search, qa, kg, compare, complexity
 from app.database import engine, Base
 
 import logging
@@ -43,6 +43,7 @@ app.include_router(search.router, prefix="/api/search", tags=["向量搜索"])
 app.include_router(qa.router, prefix="/api", tags=["智能问答"])
 app.include_router(kg.router, prefix="/api", tags=["知识图谱"])
 app.include_router(compare.router, prefix="/api", tags=["合同对比"])
+app.include_router(complexity.router, prefix="/api/complexity", tags=["条款复杂度"])
 
 @app.get("/")
 async def root():
@@ -51,4 +52,3 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}
-

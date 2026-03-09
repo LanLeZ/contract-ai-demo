@@ -17,7 +17,9 @@ import {
   Col,
   Spin,
   Tabs,
-  Alert
+  Alert,
+  Tooltip,
+  List,
 } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import { 
@@ -62,6 +64,10 @@ const Contracts = () => {
   const [kgLoading, setKgLoading] = useState(false)
   const [kgTriples, setKgTriples] = useState([])
   const [kgError, setKgError] = useState(null)
+  // 长难句复杂度相关状态
+  const [complexityLoading, setComplexityLoading] = useState(false)
+  const [complexityError, setComplexityError] = useState(null)
+  const [complexityData, setComplexityData] = useState(null)
 
   useEffect(() => {
     // 等待认证状态加载完成
@@ -131,6 +137,11 @@ const Contracts = () => {
     setQaSessions([])
     // 加载该合同下的历史会话
     loadSessions(record.id)
+    // 不在这里触发长难句解析（可能很耗时）；等用户切换到“长难句解析”TAB时再触发
+    // 但如果用户当前就在“长难句解析”TAB，则需要立即为新合同触发加载/分析
+    if (activeTab === 'complexity') {
+      loadComplexityForContract(record.id, { autoAnalyze: true })
+    }
   }
 
   const handleBackToUpload = () => {
@@ -144,6 +155,10 @@ const Contracts = () => {
     // 重置知识图谱
     setKgTriples([])
     setKgError(null)
+    // 重置长难句复杂度
+    setComplexityData(null)
+    setComplexityError(null)
+    setComplexityLoading(false)
     setQaInput('')
   }
 
@@ -630,6 +645,162 @@ const Contracts = () => {
     }
   }
 
+  const loadComplexityForContract = async (contractId, options = {}) => {
+    if (!contractId) return
+    setComplexityLoading(true)
+    setComplexityError(null)
+    try {
+      const { autoAnalyze = true } = options || {}
+      try {
+        const data = await contractService.getContractComplexity(contractId)
+        setComplexityData(data || null)
+        return
+      } catch (error) {
+        // 若尚未分析（后端返回 404），可在用户明确打开 TAB 时自动触发一次分析
+        const status = error?.response?.status
+        const detail = error?.response?.data?.detail
+        const isNotAnalyzed =
+          status === 404 && (detail === '该合同尚未进行复杂度分析' || !detail)
+
+        if (!autoAnalyze || !isNotAnalyzed) {
+          throw error
+        }
+
+        const analyzed = await contractService.analyzeContractComplexity(contractId, {
+          threshold: 100.0,
+          with_llm_explain: true,
+        })
+        setComplexityData(analyzed || null)
+      }
+    } catch (error) {
+      console.error('加载长难句复杂度结果失败:', error)
+      setComplexityError(error.response?.data?.detail || '加载长难句解析结果失败')
+    } finally {
+      setComplexityLoading(false)
+    }
+  }
+
+  const buildComplexityHighlights = () => {
+    const fullText = contractDetail?.file_content || ''
+    const clauses = complexityData?.clauses || []
+    if (!fullText || !clauses.length) {
+      return <span>{fullText || '暂无内容'}</span>
+    }
+
+    // 只对被判定为长难句的条款做高亮
+    const complexClauses = clauses.filter((c) => c.is_complex && c.clause_text)
+    if (!complexClauses.length) {
+      return <span>{fullText}</span>
+    }
+
+    // 计算每个条款在全文中的首次出现位置
+    const ranges = []
+    complexClauses.forEach((clause, idx) => {
+      const text = clause.clause_text
+      const start = fullText.indexOf(text)
+      if (start !== -1) {
+        ranges.push({
+          start,
+          end: start + text.length,
+          clause,
+          key: `${clause.clause_marker || 'clause'}_${idx}`,
+        })
+      }
+    })
+
+    if (!ranges.length) {
+      return <span>{fullText}</span>
+    }
+
+    // 按起始位置排序，并去除重叠
+    ranges.sort((a, b) => a.start - b.start)
+    const merged = []
+    ranges.forEach((r) => {
+      const last = merged[merged.length - 1]
+      if (!last || r.start >= last.end) {
+        merged.push(r)
+      }
+    })
+
+    const segments = []
+    let cursor = 0
+
+    merged.forEach((r) => {
+      if (cursor < r.start) {
+        segments.push({
+          type: 'text',
+          text: fullText.slice(cursor, r.start),
+          key: `text_${cursor}_${r.start}`,
+        })
+      }
+      segments.push({
+        type: 'highlight',
+        text: fullText.slice(r.start, r.end),
+        clause: r.clause,
+        key: r.key,
+      })
+      cursor = r.end
+    })
+
+    if (cursor < fullText.length) {
+      segments.push({
+        type: 'text',
+        text: fullText.slice(cursor),
+        key: `text_${cursor}_${fullText.length}`,
+      })
+    }
+
+    return (
+      <>
+        {segments.map((seg) => {
+          if (seg.type === 'text') {
+            return (
+              <span key={seg.key}>
+                {seg.text}
+              </span>
+            )
+          }
+
+          const clause = seg.clause
+          const title = (
+            <div style={{ maxWidth: 360 }}>
+              <div style={{ marginBottom: 4 }}>
+                <strong>条款编号：</strong>
+                {clause.clause_marker || '未编号'}
+              </div>
+              <div style={{ marginBottom: 4 }}>
+                <strong>复杂度得分：</strong>
+                {typeof clause.complexity_score === 'number'
+                  ? clause.complexity_score.toFixed(1)
+                  : '-'}
+              </div>
+              <div>
+                <strong>大白话解释：</strong>
+                <div style={{ marginTop: 2 }}>
+                  {clause.llm_plain_explanation || '暂无解释'}
+                </div>
+              </div>
+            </div>
+          )
+
+          return (
+            <Tooltip key={seg.key} title={title} placement="top">
+              <span
+                style={{
+                  backgroundColor: '#fffbe6',
+                  borderBottom: '1px dashed #faad14',
+                  cursor: 'pointer',
+                }}
+              >
+                {seg.text}
+              </span>
+            </Tooltip>
+          )
+        })}
+      </>
+    )
+  }
+
   const renderRightContent = () => {
     if (selectedContract && contractDetail) {
       // 显示合同详情
@@ -658,6 +829,10 @@ const Contracts = () => {
                   // 切换到知识图谱 Tab 时，懒加载抽取/加载
                   loadKGForContract(contractDetail.id)
                 }
+                if (key === 'complexity' && contractDetail?.id) {
+                  // 切换到长难句解析 Tab 时，懒加载复杂度结果
+                  loadComplexityForContract(contractDetail.id)
+                }
               }}
               items={[
                 {
@@ -684,6 +859,121 @@ const Contracts = () => {
                           {contractDetail.file_content || '暂无内容'}
                         </div>
                       </Card>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'complexity',
+                  label: '长难句解析',
+                  children: (
+                    <div style={{ marginTop: 16 }}>
+                      {complexityError && (
+                        <Alert
+                          type="error"
+                          message="长难句解析加载失败"
+                          description={complexityError}
+                          showIcon
+                          style={{ marginBottom: 16 }}
+                        />
+                      )}
+                      <Row gutter={16}>
+                        <Col span={16}>
+                          <Card
+                            title="全文（长难句已高亮）"
+                            extra={
+                              complexityLoading && (
+                                <Space size="small">
+                                  <Spin size="small" />
+                                  <Text type="secondary">正在加载长难句解析...</Text>
+                                </Space>
+                              )
+                            }
+                            bodyStyle={{
+                              maxHeight: 500,
+                              overflow: 'auto',
+                              padding: 16,
+                              background: '#fafafa',
+                              border: '1px solid #d9d9d9',
+                              borderRadius: 4,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              fontSize: 14,
+                              lineHeight: 1.8,
+                            }}
+                          >
+                            {complexityLoading && !complexityData ? (
+                              <div style={{ textAlign: 'center', padding: 24 }}>
+                                <Spin />
+                                <div style={{ marginTop: 8 }}>正在解析合同中的长难句...</div>
+                              </div>
+                            ) : (
+                              buildComplexityHighlights()
+                            )}
+                          </Card>
+                        </Col>
+                        <Col span={8}>
+                          <Card title="疑似长难句条款">
+                            {complexityLoading && !complexityData ? (
+                              <div style={{ textAlign: 'center', padding: 24 }}>
+                                <Spin size="small" />
+                              </div>
+                            ) : (
+                              <>
+                                {!complexityData?.clauses?.length && !complexityError ? (
+                                  <Text type="secondary">
+                                    暂未检测到明显的长难句条款，这份合同整体句子结构较为简单。
+                                  </Text>
+                                ) : (
+                                  <List
+                                    size="small"
+                                    dataSource={
+                                      (complexityData?.clauses || [])
+                                        .filter((c) => c.is_complex)
+                                        .sort(
+                                          (a, b) =>
+                                            (b.complexity_score || 0) -
+                                            (a.complexity_score || 0)
+                                        )
+                                    }
+                                    renderItem={(item) => (
+                                      <List.Item
+                                        key={`${item.clause_marker || 'clause'}_${
+                                          item.clause_index ?? 0
+                                        }`}
+                                      >
+                                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                                          <Space>
+                                            <Tag color="volcano">
+                                              {item.clause_marker || `条款 ${item.clause_index + 1}`}
+                                            </Tag>
+                                            {typeof item.complexity_score === 'number' && (
+                                              <Tag color="gold">
+                                                分数 {item.complexity_score.toFixed(1)}
+                                              </Tag>
+                                            )}
+                                          </Space>
+                                          <Text ellipsis={{ tooltip: item.clause_text }}>
+                                            {item.clause_text}
+                                          </Text>
+                                          {item.llm_plain_explanation && (
+                                            <Text
+                                              type="secondary"
+                                              ellipsis={{ tooltip: item.llm_plain_explanation }}
+                                              style={{ fontSize: 12 }}
+                                            >
+                                              {item.llm_plain_explanation}
+                                            </Text>
+                                          )}
+                                        </Space>
+                                      </List.Item>
+                                    )}
+                                  />
+                                )}
+                              </>
+                            )}
+                          </Card>
+                        </Col>
+                      </Row>
                     </div>
                   ),
                 },

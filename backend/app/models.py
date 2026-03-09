@@ -1,6 +1,6 @@
 # backend/app/models.py
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -51,6 +51,11 @@ class Contract(Base):
     )
     chunks = relationship(
         "ContractChunk",
+        back_populates="contract",
+        cascade="all, delete-orphan",
+    )
+    clause_complexities = relationship(
+        "ClauseComplexity",
         back_populates="contract",
         cascade="all, delete-orphan",
     )
@@ -167,3 +172,47 @@ class ContractChunk(Base):
 
     # 关系
     contract = relationship("Contract", back_populates="chunks")
+
+
+class ClauseComplexity(Base):
+    """条款复杂度分析结果"""
+    __tablename__ = "clause_complexities"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 所属合同
+    contract_id = Column(
+        Integer,
+        ForeignKey("contracts.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # 条款在合同中的顺序索引
+    clause_index = Column(Integer, nullable=False)
+
+    # 条款编号/标记，例如 "1.1"、"第3条"
+    clause_marker = Column(String(64), nullable=True, index=True)
+
+    # 条款原文
+    clause_text = Column(Text, nullable=False)
+
+    # HanLP 计算出的条款复杂度得分（取条款内句子最大复杂度）
+    complexity_score = Column(Float, nullable=False, default=0.0)
+
+    # 是否为复杂条款（超过阈值）
+    is_complex = Column(Boolean, nullable=False, default=False)
+
+    # HanLP 返回的原始 JSON（方便排查）
+    hanlp_raw_json = Column(Text, nullable=True)
+
+    # LLM 生成的通俗解释
+    llm_plain_explanation = Column(Text, nullable=True)
+
+    # LLM 生成的简化重写条款
+    llm_simplified_clause = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 关系
+    contract = relationship("Contract", back_populates="clause_complexities")

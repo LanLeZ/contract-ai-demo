@@ -169,6 +169,16 @@ const ContractCompare = () => {
           setRightLoadingDetail(true)
         }
         const detail = await contractService.getContract(contract.id)
+
+        // 触发一次知识图谱抽取（失败不影响主流程）
+        if (detail?.id) {
+          try {
+            await contractService.extractContractKG(detail.id)
+          } catch (e) {
+            console.error('触发知识图谱抽取失败:', e)
+          }
+        }
+
         if (side === 'left') {
           setLeftContract(detail)
         } else {
@@ -612,6 +622,21 @@ const ContractCompare = () => {
                       style={{ maxHeight: '100%', overflowY: 'auto' }}
                       renderItem={(item) => {
                         const isActive = selectedHistoryId === item.id
+                        const leftName =
+                          item.left_contract_filename ||
+                          (item.left_contract_id ? `合同 ${item.left_contract_id}` : '未知合同')
+
+                        const createdText = item.created_at
+                          ? new Date(item.created_at).toLocaleString('zh-CN', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
+                          : ''
+
                         return (
                           <List.Item
                             style={{
@@ -622,26 +647,35 @@ const ContractCompare = () => {
                             onClick={() => loadCompareFromHistory(item)}
                           >
                             <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                              <Space size={4}>
+                              <Space size={4} style={{ width: '100%' }}>
                                 <Tag color="blue">#{item.id}</Tag>
-                                <Text style={{ fontSize: 12 }}>
-                                  {item.status === 'success'
-                                    ? '已完成'
-                                    : item.status === 'failed'
-                                    ? '失败'
-                                    : item.status === 'running'
-                                    ? '进行中'
-                                    : item.status}
+                                <Text
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 500,
+                                    maxWidth: 190,
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                  title={`${leftName} 对比`}
+                                >
+                                  {leftName} 对比
                                 </Text>
                               </Space>
-                              <Text type="secondary" style={{ fontSize: 11 }}>
-                                {item.created_at
-                                  ? new Date(item.created_at).toLocaleString('zh-CN')
-                                  : ''}
+                              <Text type="secondary" style={{ fontSize: 11, fontWeight: 500 }}>
+                                {createdText}
                               </Text>
                               <Text type="secondary" style={{ fontSize: 11 }}>
                                 左合同 ID: {item.left_contract_id} | 右合同 ID:{' '}
-                                {item.right_contract_id}
+                                {item.right_contract_id} | 状态:{' '}
+                                {item.status === 'success'
+                                  ? '已完成'
+                                  : item.status === 'failed'
+                                  ? '失败'
+                                  : item.status === 'running'
+                                  ? '进行中'
+                                  : item.status || '未知'}
                               </Text>
                             </Space>
                           </List.Item>

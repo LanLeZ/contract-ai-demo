@@ -1,3 +1,4 @@
+
 import json
 import logging
 import os
@@ -57,6 +58,85 @@ class QwenChatClient:
 
         # DashScope Generation.call qwen-plus 当前返回 output["text"]
         return resp.output.get("text", "").strip()
+
+
+def build_clause_complexity_prompt(clause: Dict[str, Any]) -> str:
+    """
+    基于 HanLP 返回的单条 ClauseResult 构造 LLM 提示词（条款复杂度解释与简化重写）。
+    """
+    clause_text = clause.get("text") or ""
+    score = clause.get("clause_complexity_score", 0.0)
+    reasons: List[str] = []
+    for s in clause.get("sentence_results", []):
+        comp = s.get("complexity") or {}
+        if comp.get("is_complex"):
+            rs = comp.get("reasons") or []
+            for r in rs:
+                if r and r not in reasons:
+                    reasons.append(str(r))
+
+    reasons_text = "；".join(reasons) if reasons else "句子结构较复杂或依存关系较长"
+
+    prompt = f"""
+你是一名非常有耐心的中文律师助理，现在的任务是：把一条看起来比较绕、比较长的合同条款，用【完全听得懂的大白话】讲给一个几乎不懂法律的普通人（可以把他当成家里的老人）听。
+
+要求：
+1. 不要用专业术语，如果必须用（比如“违约责任”“服务期”），请顺便解释一下是什么意思。
+2. 多用“你”“对方”“公司”这种日常说话的方式，像聊天一样，一步一步讲清楚。
+3. 重点说清楚：
+   - 这条条款大概在讲什么事？
+   - 你（签字的人）需要做什么、不做什么？
+   - 如果不按这条来做，会有什么后果、可能吃什么亏？
+4. 不要复述原文，不要一句话一句话翻译，要用自己的话重新解释，让没上过法律课的人也能听懂。
+
+下面是待解释的原始条款和一些复杂度线索：
+
+【原条款】：
+{clause_text}
+
+【复杂度线索】：
+- 复杂度得分：{score}
+- 模型判断原因（可能不完全）：{reasons_text}
+
+请按照下面 JSON 格式输出结果，仅输出 JSON，不要额外说明：
+
+{{
+  "plain_explanation": "用非常通俗的话，分几句话解释上面这条条款，让没有法律背景的普通人（比如老人）也能明白自己要做什么、有哪些风险。"
+}}
+""".strip()
+    return prompt
+
+
+def explain_clause_complexity_with_llm(
+    qwen: QwenChatClient,
+    clause: Dict[str, Any],
+) -> Tuple[str, str]:
+    """
+    使用通义千问为单条复杂条款生成“解释 + 简化版本”。
+    返回：(plain_explanation, simplified_clause)
+    """
+    prompt = build_clause_complexity_prompt(clause)
+    messages = [
+        {
+            "role": "system",
+            "content": "你是一个严谨的中文法律助手，只输出合法 JSON。",
+        },
+        {"role": "user", "content": prompt},
+    ]
+    raw = qwen.chat(messages, temperature=0.2).strip()
+    try:
+        data = json.loads(raw)
+        plain_expl = str(data.get("plain_explanation") or "").strip()
+        simplified = str(data.get("simplified_clause") or "").strip()
+        if not plain_expl:
+            plain_expl = clause.get("text") or ""
+        if not simplified:
+            simplified = clause.get("text") or ""
+        return plain_expl, simplified
+    except Exception as e:  # noqa: BLE001
+        logger.error("解析 LLM 条款解释 JSON 失败: %r, raw=%s", e, raw[:500])
+        text = clause.get("text") or ""
+        return text, text
 
     def analyze_scope_and_laws(self, question: str) -> Tuple[ScopeType, List[str]]:
         """
@@ -445,5 +525,4 @@ def attach_contract_compare_llm_analysis(
                 analysis = all_analysis_results.get(marker, {})
                 changed_clause["importance"] = analysis.get("importance", "normal")
                 changed_clause["explanation"] = analysis.get("explanation", "")
-
 

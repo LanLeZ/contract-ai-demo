@@ -82,6 +82,22 @@ export const contractService = {
     return response.data
   },
 
+  // 获取某合同的长难句复杂度分析结果
+  async getContractComplexity(contractId) {
+    const response = await api.get(`/api/complexity/contracts/${contractId}/complexity`)
+    return response.data
+  },
+
+  // 触发某合同的长难句复杂度分析（写入数据库并返回结果）
+  async analyzeContractComplexity(contractId, params = {}) {
+    const response = await api.post(
+      `/api/complexity/contracts/${contractId}/complexity/analyze`,
+      null,
+      { params }
+    )
+    return response.data
+  },
+
   // 触发某合同的知识图谱抽取（分类 + 模板抽取）
   async extractContractKG(contractId) {
     const response = await api.post(`/api/contracts/${contractId}/kg-extract`)

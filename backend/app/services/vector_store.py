@@ -367,3 +367,78 @@ class VectorStore:
             "metadata": self.collection.metadata
         }
 
+    def delete_documents(
+        self,
+        filter_metadata: Dict,
+        batch_size: int = 500,
+    ) -> int:
+        """
+        根据 metadata 条件删除向量库中的文档。
+
+        典型用法：
+            - 按合同删除：{"user_id": 1, "contract_id": 123, "source_type": "contract"}
+            - 按用户删除：{"user_id": 1}
+
+        Args:
+            filter_metadata: 过滤条件，语义与 search 中的 filter_metadata 一致。
+            batch_size: 每次批量删除的最大数量，避免一次性加载过多 ID。
+
+        Returns:
+            实际删除的文档数量。
+        """
+        if not filter_metadata:
+            raise ValueError("filter_metadata 不能为空，避免误删整个集合")
+
+        # 构建 where 条件，复用 search 中的逻辑，确保行为一致
+        if len(filter_metadata) == 1:
+            where = filter_metadata
+        else:
+            where = {
+                "$and": [
+                    {key: value} for key, value in filter_metadata.items()
+                ]
+            }
+
+        total_deleted = 0
+
+        try:
+            while True:
+                # 先查出一批待删除的 ID
+                results = self.collection.get(
+                    where=where,
+                    limit=batch_size,
+                )
+                ids = results.get("ids") or []
+
+                # Chroma 在只有一批结果时可能返回 ["id1", "id2", ...]
+                # 也可能返回嵌套列表结构，这里统一展开一层
+                if ids and isinstance(ids[0], list):
+                    flat_ids = []
+                    for sub in ids:
+                        flat_ids.extend(sub or [])
+                    ids = flat_ids
+
+                if not ids:
+                    break
+
+                self.collection.delete(ids=ids)
+                batch_count = len(ids)
+                total_deleted += batch_count
+
+                logger.info(
+                    f"从集合 {self.collection_name} 中删除 {batch_count} 条向量文档，累计已删除 {total_deleted} 条"
+                )
+
+                # 如果本批数量小于 batch_size，说明已经删完
+                if batch_count < batch_size:
+                    break
+
+            logger.info(
+                f"根据过滤条件 {filter_metadata} 共删除 {total_deleted} 条向量文档"
+            )
+            return total_deleted
+        except Exception as e:
+            logger.error(
+                f"根据过滤条件 {filter_metadata} 删除向量文档失败: {str(e)}"
+            )
+            raise

@@ -8,8 +8,11 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app import models, schemas
 from app.security import get_current_user
@@ -371,7 +374,7 @@ async def delete_document(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """删除合同（包括文件、数据库记录、会话记录和向量库中的文档）"""
+    """删除合同（包括文件、数据库记录、会话记录、对比历史和向量库中的文档）"""
     contract = db.query(models.Contract).filter(
         models.Contract.id == contract_id,
         models.Contract.user_id == current_user.id
@@ -395,18 +398,40 @@ async def delete_document(
         # 2. 删除该合同下的所有会话记录，避免产生孤儿会话数据
         db.query(models.Conversation).filter(
             models.Conversation.user_id == current_user.id,
-            models.Conversation.contract_id == contract.id
+            models.Conversation.contract_id == contract.id,
         ).delete(synchronize_session=False)
 
-        # 3. 删除向量库中的相关文档
-        # 注意：ChromaDB没有直接按metadata删除的API，这里先删除数据库和会话记录
-        # 可以考虑在向量库中存储contract_id，然后通过查询+删除的方式清理
-        # 暂时先删除数据库记录，向量库中的文档可以定期清理
+        # 3. 删除与该合同相关的所有对比历史记录
+        db.query(models.ContractCompare).filter(
+            models.ContractCompare.user_id == current_user.id,
+            or_(
+                models.ContractCompare.left_contract_id == contract.id,
+                models.ContractCompare.right_contract_id == contract.id,
+            ),
+        ).delete(synchronize_session=False)
 
-        # 4. 删除数据库中的合同记录
+        # 4. 删除向量库中的相关文档（按 metadata 过滤）
+        try:
+            vector_store.delete_documents(
+                filter_metadata={
+                    "user_id": current_user.id,
+                    "contract_id": contract.id,
+                    "source_type": "contract",
+                },
+                batch_size=500,
+            )
+        except Exception as e:
+            # 向量库删除失败不影响主流程，只记录日志
+            logger.error(
+                "删除合同 %s 相关向量失败，将忽略向量库错误继续删除合同: %s",
+                contract.id,
+                e,
+            )
+
+        # 5. 删除数据库中的合同记录
         db.delete(contract)
         db.commit()
-        
+
         return None
     except Exception as e:
         db.rollback()

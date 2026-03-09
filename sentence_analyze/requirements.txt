@@ -1,0 +1,22 @@
+# 建议为 HanLP 句法分析单独建 venv 使用，避免与后端依赖冲突
+#
+# 说明：
+# - HanLP 依存句法（CTB7_BIAFFINE_DEP_ZH）依赖 TensorFlow（hanlp[full] 会拉取）
+# - TensorFlow 2.13.x 在 Windows 上对 typing-extensions 有严格上限（<4.6），
+#   因此不能与后端（FastAPI/Pydantic2）装在同一个环境里
+
+hanlp[full]
+
+# 解析 docx（如后续有需要，可在该服务内使用）
+python-docx==0.8.11
+
+# 基础工具（可选）
+python-dotenv
+pymysql
+
+# 提供 HTTP 服务
+fastapi
+uvicorn
+pydantic
+
+
