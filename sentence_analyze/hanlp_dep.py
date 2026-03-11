@@ -131,3 +131,8 @@ def parse_dep(dep_model, sentence: str) -> Dict[str, Any]:
     raise TypeError(f"无法识别 HanLP dep 输出类型：{type(out)!r}")
 
 
+
+
+
+
+

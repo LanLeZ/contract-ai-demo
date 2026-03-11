@@ -33,8 +33,8 @@ parser = DocumentParser()
 # - source_type="contract" 时使用 ContractTextSplitter（固定参数 200/60）
 # - source_type="legal" 时使用 LegalTextSplitter（使用传入的参数）
 splitter = LawTextSplitter(chunk_size=200, chunk_overlap=60)
-# 使用新的 collection 存放基于最新切分逻辑的合同向量，保留旧的 collection 以便回滚/对比
-vector_store = VectorStore(collection_name="legal_contracts_v2")
+# 使用新的 cosine collection（法律条文已重新导入到该库）
+vector_store = VectorStore(collection_name="legal_contracts_v2_cosine")
 qwen_client = QwenChatClient()
 
 # 上传文件存储目录

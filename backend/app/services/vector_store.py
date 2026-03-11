@@ -70,7 +70,7 @@ class DashScopeEmbeddingFunction:
 class VectorStore:
     """Chroma向量库封装"""
     
-    def __init__(self, persist_directory: str = None, collection_name: str = "legal_contracts"):
+    def __init__(self, persist_directory: str = None, collection_name: str = "legal_contracts_v2_cosine"):
         """
         初始化向量库
         Args:
@@ -102,7 +102,8 @@ class VectorStore:
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             embedding_function=DashScopeEmbeddingFunction(),
-            metadata={"description": "法律条文和合同向量库"}
+            metadata={"description": "法律条文和合同向量库",
+                    "hnsw:space": "cosine",} #使用余弦相似度
         )
         logger.info(f"向量库集合已就绪，当前文档数: {self.collection.count()}")
     

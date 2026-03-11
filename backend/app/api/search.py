@@ -12,7 +12,7 @@ from app.services.vector_store import VectorStore
 router = APIRouter()
 
 # 初始化向量库，使用新的 collection 存放基于最新切分逻辑的向量数据
-vector_store = VectorStore(collection_name="legal_contracts_v2")
+vector_store = VectorStore(collection_name="legal_contracts_v2_cosine")
 
 
 @router.post("/", response_model=schemas.SearchResponse)

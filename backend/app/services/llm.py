@@ -138,6 +138,7 @@ def explain_clause_complexity_with_llm(
         text = clause.get("text") or ""
         return text, text
 
+
     def analyze_scope_and_laws(self, question: str) -> Tuple[ScopeType, List[str]]:
         """
         一次性完成：检索范围分类 + 可能相关法律文件名抽取（贴近 Law-Book 的文件名风格）
@@ -204,6 +205,7 @@ def explain_clause_complexity_with_llm(
             cleaned = []
 
         return scope, cleaned
+
 
     def answer_question_with_rag(
         self,
@@ -525,4 +527,6 @@ def attach_contract_compare_llm_analysis(
                 analysis = all_analysis_results.get(marker, {})
                 changed_clause["importance"] = analysis.get("importance", "normal")
                 changed_clause["explanation"] = analysis.get("explanation", "")
+
+
 
