@@ -57,6 +57,13 @@ class UserUpdate(BaseModel):
         return v
 
 
+class UserStats(BaseModel):
+    contract_count: int = Field(default=0, description="已上传合同数")
+    compare_count: int = Field(default=0, description="已对比合同数")
+    conversation_count: int = Field(default=0, description="问答会话数")
+    clause_complexity_count: int = Field(default=0, description="已解析长难句数")
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str

@@ -196,7 +196,7 @@ const Contracts = () => {
 
   const handleUpload = async (file) => {
     // 验证文件类型
-    const allowedTypes = ['.pdf', '.docx', '.txt', '.png', '.jpg', '.jpeg']
+    const allowedTypes = ['.pdf', '.docx', '.txt']
     const fileExt = getFileExt(file?.name)
     
     if (!allowedTypes.includes(fileExt)) {
@@ -208,35 +208,6 @@ const Contracts = () => {
     const maxSize = 50 * 1024 * 1024
     if (file.size > maxSize) {
       message.error('文件大小超过限制（最大50MB）')
-      return false
-    }
-
-    // 如果正在收集图片页，禁止混传其他文件
-    const isImage = isImageFile(file)
-    if (pendingImages.length > 0 && !isImage) {
-      message.warning('你正在添加图片页，请先“完成上传”或“清空”，再上传其他类型文件。')
-      return false
-    }
-
-    // 图片：进入“收集页”模式
-    if (isImage) {
-      if (pendingImages.length === 0) {
-        Modal.confirm({
-          title: '检测到图片',
-          content: '这是多页合同吗？如果是请继续添加图片，最后点击“完成上传”。',
-          okText: '继续添加',
-          cancelText: '直接上传这一张',
-          onOk: () => {
-            setPendingImages((prev) => [...prev, file])
-          },
-          onCancel: async () => {
-            await submitImagesAsOneContract([file])
-          },
-        })
-      } else {
-        setPendingImages((prev) => [...prev, file])
-        message.success(`已添加第 ${pendingImages.length + 1} 张图片`)
-      }
       return false
     }
 
@@ -383,21 +354,16 @@ const Contracts = () => {
       ),
     },
     {
-      title: '文件类型',
+      title: '类型',
       dataIndex: 'filename',
       key: 'fileType',
-      width: 120,
+      width: 80,
       render: (filename) => {
         const ext = filename.split('.').pop().toLowerCase()
         const typeMap = {
           pdf: { color: 'red', text: 'PDF' },
           docx: { color: 'blue', text: 'DOCX' },
-          md: { color: 'green', text: 'Markdown' },
-          markdown: { color: 'green', text: 'Markdown' },
           txt: { color: 'orange', text: 'TXT' },
-          png: { color: 'purple', text: 'PNG' },
-          jpg: { color: 'purple', text: 'JPG' },
-          jpeg: { color: 'purple', text: 'JPEG' },
         }
         const type = typeMap[ext] || { color: 'default', text: ext.toUpperCase() }
         return <Tag color={type.color}>{type.text}</Tag>
@@ -407,14 +373,14 @@ const Contracts = () => {
       title: '上传时间',
       dataIndex: 'upload_time',
       key: 'upload_time',
-      width: 180,
+      width: 110,
       render: (time) => time ? new Date(time).toLocaleDateString('zh-CN') : '-',
       sorter: (a, b) => new Date(a.upload_time) - new Date(b.upload_time),
     },
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 72,
       render: (_, record) => (
         <Popconfirm
           title="确定要删除这个合同吗？"
@@ -819,6 +785,8 @@ const Contracts = () => {
               <span>{contractDetail.filename}</span>
             </Space>
           }
+          style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          bodyStyle={{ flex: 1, overflow: 'auto' }}
         >
           <Spin spinning={loadingDetail}>
             <Tabs
@@ -1164,54 +1132,80 @@ const Contracts = () => {
 
     // 默认显示上传区域
     return (
-      <Card title={pendingImages.length > 0 ? "已添加图片页" : "上传合同文件"}>
-        {pendingImages.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <Space wrap>
-              <Tag color="blue">已添加 {pendingImages.length} 张</Tag>
-              <Button
-                type="primary"
-                onClick={() => submitImagesAsOneContract(pendingImages)}
-                disabled={uploading || pendingImages.length === 0}
-              >
-                完成上传
-              </Button>
-              <Button
-                onClick={() => setPendingImages([])}
-                disabled={uploading}
-              >
-                清空
-              </Button>
-            </Space>
-            <div style={{ marginTop: 8, color: '#666' }}>
-              {pendingImages.slice(0, 5).map((f, idx) => (
-                <div key={`${f.name}_${idx}`}>{idx + 1}. {f.name}</div>
-              ))}
-              {pendingImages.length > 5 && (
-                <div>... 还有 {pendingImages.length - 5} 张</div>
-              )}
-            </div>
-          </div>
-        )}
+      <Card
+        title={
+          <span style={{ fontSize: 16, color: '#fff' }}>上传合同文件</span>
+        }
+        headStyle={{ background: '#1677FF', color: '#fff', padding: '10px 16px', borderBottom: 'none' }}
+        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+        bodyStyle={{ height: '100%', padding: 16 }}
+      >
+        <div style={{ height: '70%' }}>
+          <Dragger
+            name="file"
+            multiple={true}
+            accept=".pdf,.docx,.txt"
+            beforeUpload={handleUpload}
+            showUploadList={false}
+            disabled={uploading}
+            height="100%"
+            style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <p className="ant-upload-drag-icon">
+              <InboxOutlined />
+            </p>
+            <p className="ant-upload-text">
+              {uploading ? '正在上传...' : '点击或拖拽文件到此区域上传'}
+            </p>
+            <p className="ant-upload-hint">
+              支持 PDF、DOCX、TXT 格式；最大 50MB
+            </p>
+          </Dragger>
+        </div>
 
-        <Dragger
-          name="file"
-          multiple={true}
-          accept=".pdf,.docx,.md,.markdown,.txt,.png,.jpg,.jpeg"
-          beforeUpload={handleUpload}
-          showUploadList={false}
-          disabled={uploading}
-        >
-          <p className="ant-upload-drag-icon">
-            <InboxOutlined />
-          </p>
-          <p className="ant-upload-text">
-            {uploading ? '正在上传...' : pendingImages.length > 0 ? '继续拖拽图片页到此处追加' : '点击或拖拽文件到此区域上传'}
-          </p>
-          <p className="ant-upload-hint">
-            支持 PDF、DOCX、Markdown、TXT、PNG/JPG/JPEG 格式；图片可多张合并上传；最大 50MB
-          </p>
-        </Dragger>
+        <div style={{ height: 'calc(30% - 12px)', marginTop: 12 }}>
+          <Row gutter={[12, 12]} style={{ width: '100%', height: '100%' }}>
+            <Col span={8} style={{ height: '100%' }}>
+              <Card
+                hoverable
+                size="small"
+                className="contract-intro-card"
+                style={{ height: '100%', cursor: 'pointer' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+              >
+                <img src="/images/triples.png" alt="知识图谱" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
+                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>知识图谱</div>
+                <Text type="secondary" style={{ fontSize: 12 }}>实体关系抽取与可视化</Text>
+              </Card>
+            </Col>
+            <Col span={8} style={{ height: '100%' }}>
+              <Card
+                hoverable
+                size="small"
+                className="contract-intro-card"
+                style={{ height: '100%', cursor: 'pointer' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+              >
+                <img src="/images/qa.png" alt="智能问答" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
+                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>智能问答</div>
+                <Text type="secondary" style={{ fontSize: 12 }}>基于合同内容的问答</Text>
+              </Card>
+            </Col>
+            <Col span={8} style={{ height: '100%' }}>
+              <Card
+                hoverable
+                size="small"
+                className="contract-intro-card"
+                style={{ height: '100%', cursor: 'pointer' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+              >
+                <img src="/images/analyze.png" alt="长难句解析" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
+                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>长难句解析</div>
+                <Text type="secondary" style={{ fontSize: 12 }}>条款复杂度分析与通俗化</Text>
+              </Card>
+            </Col>
+          </Row>
+        </div>
       </Card>
     )
   }
@@ -1226,7 +1220,14 @@ const Contracts = () => {
         alignItems: 'center',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
       }}>
-        <Title level={3} style={{ margin: 0 }}>合同智能解读系统</Title>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img
+            src="/images/APP.png"
+            alt="logo"
+            style={{ height: 36, verticalAlign: 'middle' }}
+          />
+          <Title level={3} style={{ margin: 0 }}>合同智能解读系统</Title>
+        </div>
         <Space>
           <Button 
             type="text"
@@ -1245,12 +1246,12 @@ const Contracts = () => {
         </Space>
       </Header>
       <Content style={{ padding: '24px', background: '#f0f2f5' }}>
-        <Row gutter={24} style={{ height: 'calc(100vh - 112px)' }}>
+        <Row gutter={16} style={{ height: 'calc(100vh - 112px)' }}>
           {/* 左侧：合同列表 */}
-          <Col span={10}>
+          <Col span={8}>
             <Card 
               title={
-                <Space>
+                <Space style={{ fontSize: 16 }}>
                   <span>合同列表</span>
                   <Tag>{filteredContracts.length}</Tag>
                 </Space>
@@ -1259,13 +1260,14 @@ const Contracts = () => {
                 <Input.Search
                   placeholder="搜索文件名"
                   allowClear
-                  style={{ width: 200 }}
+                  style={{ width: 160, backgroundColor: '#fff' }}
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                 />
               }
+              headStyle={{ background: '#1677FF', color: '#fff', padding: '10px 16px', borderBottom: 'none' }}
               style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-              bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+              bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '8px' }}
             >
               <Table
                 columns={columns}
@@ -1276,6 +1278,8 @@ const Contracts = () => {
                   pageSize: 10,
                   showSizeChanger: false,
                   showTotal: false,
+                  position: 'bottom',
+                  style: { marginTop: 'auto' }
                 }}
                 locale={{
                   emptyText: '暂无合同，请上传文件'
@@ -1287,13 +1291,13 @@ const Contracts = () => {
                     backgroundColor: selectedContract === record.id ? '#e6f7ff' : 'transparent',
                   },
                 })}
-                scroll={{ y: 'calc(100vh - 280px)' }}
+                scroll={{ y: 'calc(100vh - 280px)', x: 'max-content' }}
               />
             </Card>
           </Col>
 
           {/* 右侧：上传区域或合同详情 */}
-          <Col span={14}>
+          <Col span={16}>
             {renderRightContent()}
           </Col>
         </Row>

@@ -22,7 +22,7 @@ from backend.app.services.contract_splitter import ContractTextSplitter  # type:
 def main():
     # 目标合同
     target_user_id = 5
-    target_contract_id = 29
+    target_contract_id = 31
 
     db = SessionLocal()
     try:

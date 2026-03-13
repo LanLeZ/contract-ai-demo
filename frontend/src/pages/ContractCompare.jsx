@@ -526,9 +526,16 @@ const ContractCompare = () => {
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
         }}
       >
-        <Title level={3} style={{ margin: 0 }}>
-          合同智能解读系统 - 合同对比
-        </Title>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img
+            src="/images/APP.png"
+            alt="logo"
+            style={{ height: 36, verticalAlign: 'middle' }}
+          />
+          <Title level={3} style={{ margin: 0 }}>
+            合同智能解读系统 - 合同对比
+          </Title>
+        </div>
         <Space>
           <Button
             type="text"

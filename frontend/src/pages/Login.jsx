@@ -29,10 +29,16 @@ const Login = () => {
     <div className="app-container">
       <Card
         title={
-          <div style={{ textAlign: 'center', fontSize: '24px', fontWeight: 'bold' }}>
-            合同智能解读系统
+          <div style={{ textAlign: 'center', color: 'white' }}>
+            <img
+              src="/images/APP.png"
+              alt="logo"
+              style={{ height: '40px', marginRight: '10px', verticalAlign: 'middle' }}
+            />
+            <span style={{ fontSize: '24px', fontWeight: 'bold' }}>合同智能解读系统</span>
           </div>
         }
+        headStyle={{ backgroundColor: '#1677FF', padding: '12px 24px' }}
         style={{ width: 400 }}
       >
         <Form

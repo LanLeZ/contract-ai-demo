@@ -3,13 +3,24 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
+  box-shadow: inset 0 0 150px rgba(0, 80, 150, 0.2);
 }
 
-
-
-
-
+/* 合同上传页面介绍卡片悬停效果 */
+.contract-intro-card .ant-card-body {
+  transition: all 0.3s ease;
+}
+.contract-intro-card:hover .ant-card-body {
+  background-color: #f0f7ff;
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.2);
+}
+.contract-intro-card {
+  border-color: #91caff;
+}
+.contract-intro-card:hover {
+  border-color: #1677ff;
+}
 
 
 

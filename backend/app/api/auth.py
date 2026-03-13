@@ -148,3 +148,43 @@ async def update_profile(
 
     return current_user
 
+
+@router.get("/stats", response_model=schemas.UserStats)
+async def get_user_stats(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取当前用户的统计数据"""
+    # 统计已上传合同数
+    contract_count = db.query(models.Contract).filter(
+        models.Contract.user_id == current_user.id
+    ).count()
+
+    # 统计已对比合同数
+    compare_count = db.query(models.ContractCompare).filter(
+        models.ContractCompare.user_id == current_user.id
+    ).count()
+
+    # 统计问答会话数（按 session_id 去重）
+    from sqlalchemy import func
+    conversation_count = db.query(
+        func.count(func.distinct(models.Conversation.session_id))
+    ).filter(
+        models.Conversation.user_id == current_user.id
+    ).scalar() or 0
+
+    # 统计已解析长难句数（该用户合同下的 clause_complexity 记录数）
+    user_contract_ids = db.query(models.Contract.id).filter(
+        models.Contract.user_id == current_user.id
+    )
+    clause_complexity_count = db.query(models.ClauseComplexity).filter(
+        models.ClauseComplexity.contract_id.in_(user_contract_ids)
+    ).count()
+
+    return schemas.UserStats(
+        contract_count=contract_count,
+        compare_count=compare_count,
+        conversation_count=conversation_count,
+        clause_complexity_count=clause_complexity_count
+    )
+

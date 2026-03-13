@@ -26,10 +26,16 @@ const Register = () => {
     <div className="app-container">
       <Card
         title={
-          <div style={{ textAlign: 'center', fontSize: '24px', fontWeight: 'bold' }}>
-            用户注册
+          <div style={{ textAlign: 'center', color: 'white' }}>
+            <img
+              src="/images/APP.png"
+              alt="logo"
+              style={{ height: '40px', marginRight: '10px', verticalAlign: 'middle' }}
+            />
+            <span style={{ fontSize: '24px', fontWeight: 'bold' }}>用户注册</span>
           </div>
         }
+        headStyle={{ backgroundColor: '#1677FF', padding: '12px 24px' }}
         style={{ width: 400 }}
       >
         <Form

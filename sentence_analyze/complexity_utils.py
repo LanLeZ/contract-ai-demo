@@ -84,7 +84,7 @@ class ComplexityConfig:
     w_contract_markers: float = 1.5
 
     # 阈值：先给个默认，跑一轮后再根据 top-N 人工校准
-    threshold: float = 100.0
+    threshold: float = 80
 
 
 def score_sentence_complexity(

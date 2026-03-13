@@ -40,5 +40,11 @@ export const authService = {
     })
     return response.data
   },
+
+  // 获取用户统计数据
+  async getStats() {
+    const response = await api.get('/api/auth/stats')
+    return response.data
+  },
 }
 

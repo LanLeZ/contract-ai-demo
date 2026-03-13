@@ -1,0 +1,80 @@
+[
+  {
+    "content": "租赁物及用途\n甲方将位于北京市朝阳区某小区1号楼101室的房屋出租给乙方使用。\n乙方承租该房屋仅用于居住，不得擅自改变用途。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 0,
+      "clause_marker": "一、",
+      "parent_marker": null,
+      "hierarchy_level": 1,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  },
+  {
+    "content": "租赁期限为一年，自2024年1月1日起至2024年12月31日止。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 1,
+      "clause_marker": "1、",
+      "parent_marker": "二、",
+      "hierarchy_level": 2,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  },
+  {
+    "content": "租金标准：该房屋月租金为人民币叁仟元整（¥3000元/月）。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 2,
+      "clause_marker": "（1）",
+      "parent_marker": "三、",
+      "hierarchy_level": 2,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  },
+  {
+    "content": "支付方式：乙方应于每月的第五日前将当月租金支付至甲方指定账户。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 3,
+      "clause_marker": "（2）",
+      "parent_marker": "三、",
+      "hierarchy_level": 2,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  },
+  {
+    "content": "任何一方提前解除本合同，应提前一个月书面通知对方，并支付对方一个月租金作为违约金。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 4,
+      "clause_marker": "（1）",
+      "parent_marker": "五、",
+      "hierarchy_level": 2,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  },
+  {
+    "content": "乙方逾期支付租金的，每逾期一日，应按未付租金的千分之五向甲方支付违约金。",
+    "metadata": {
+      "source_name": "example_contract.txt",
+      "source_type": "contract",
+      "chunk_index": 5,
+      "clause_marker": "（2）",
+      "parent_marker": "五、",
+      "hierarchy_level": 2,
+      "user_id": 999,
+      "contract_id": 999
+    }
+  }
+]
