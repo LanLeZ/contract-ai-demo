@@ -10,19 +10,44 @@
 /* 合同上传页面介绍卡片悬停效果 */
 .contract-intro-card .ant-card-body {
   transition: all 0.3s ease;
+  border-radius: 8px;
 }
 .contract-intro-card:hover .ant-card-body {
   background-color: #f0f7ff;
   box-shadow: 0 4px 12px rgba(22, 119, 255, 0.2);
 }
-.contract-intro-card {
-  border-color: #91caff;
-}
-.contract-intro-card:hover {
-  border-color: #1677ff;
-}
 
-
+/* 合同详情右侧卡片：Tabs 内容区铺满高度 */
+.contract-detail-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.contract-detail-card .ant-spin-nested-loading,
+.contract-detail-card .ant-spin-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.contract-detail-card .ant-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.contract-detail-card .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.contract-detail-card .ant-tabs-content {
+  height: 100%;
+}
+.contract-detail-card .ant-tabs-tabpane {
+  height: 100%;
+  overflow: auto;
+}
 
 
 

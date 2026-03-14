@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Contracts from './pages/Contracts'
 import PersonalCenter from './pages/PersonalCenter'
 import ContractCompare from './pages/ContractCompare'
+import ContractCompareNew from './pages/ContractCompareNew'
 import { useAuth } from './hooks/useAuth'
 import './App.css'
 
@@ -31,6 +32,10 @@ function App() {
       <Route
         path="/compare"
         element={isAuthenticated ? <ContractCompare /> : <Navigate to="/login" />}
+      />
+      <Route
+        path="/compare-new"
+        element={isAuthenticated ? <ContractCompareNew /> : <Navigate to="/login" />}
       />
       <Route
         path="/profile"

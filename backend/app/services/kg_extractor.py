@@ -131,13 +131,19 @@ def build_user_prompt(contract_text: str, template_desc: str, contract_type: str
         2. 关系的方向必须严格按照模板中给出的 head_entity_type 和 tail_entity_type。
         3. 不要幻想或编造合同中没有出现的信息。
         4. 如果某个关系在合同中没有出现，就不要输出该关系的三元组。
+
+        重要提醒（必须严格遵守）：
+        - 你必须根据每种关系的"触发词"来判断该关系是否在合同中出现！
+        - 如果合同原文中完全没有出现某个关系对应的触发词（如"购买保险"关系的触发词是"意外伤害保险"、"办理保险"、"购买保险"等），即使模板中定义了这种关系，也绝对不要抽取！
+        - 宁可少抽，也不要抽错！不要因为"模板里有这个关系"就自行推断或编造三元组！
+
         5. 输出为一个 JSON 数组，每个元素是一个对象，字段如下：
            - "head": 头实体在文本中的具体值
            - "head_type": 头实体的类型（必须是模板中的某个实体类型字符串）
            - "relation": 关系名（必须是模板中定义的关系名）
            - "tail": 尾实体在文本中的具体值
            - "tail_type": 尾实体的类型（必须是模板中的某个实体类型字符串）
-           - "evidence": 支撑这个三元组的原文句子（或者几个紧挨着的短句）
+           - "evidence": 支撑这个三元组的原文句子（必须包含对应关系的触发词）
 
         6. 输出必须是合法的 JSON，不要包含多余的解释性文字，只输出 JSON。
 
@@ -188,26 +194,65 @@ def parse_llm_triples(raw: str) -> List[dict]:
         return []
 
 
-def filter_valid_triples(triples: List[dict]) -> List[dict]:
+def build_relation_triggers_map(template: dict) -> Dict[str, List[str]]:
     """
-    过滤掉 head 或 tail 为空的关系（你特别要求的逻辑）：
-    - 若 head 或 tail 为 None / 空字符串 / 只包含空白，则丢弃该条。
+    从模板中构建关系名到触发词列表的映射。
+    """
+    triggers_map: Dict[str, List[str]] = {}
+    for r in template.get("relations", []):
+        relation_name = r.get("relation", "")
+        triggers = r.get("triggers", [])
+        if relation_name and triggers:
+            triggers_map[relation_name] = triggers
+    return triggers_map
+
+
+def filter_valid_triples(
+    triples: List[dict],
+    relation_triggers_map: Optional[Dict[str, List[str]]] = None,
+) -> List[dict]:
+    """
+    过滤掉不合法的三元组：
+    1. 若 head 或 tail 为 None / 空字符串 / 只包含空白，则丢弃该条。
+    2. 若提供了 relation_triggers_map，则检查 evidence 中是否包含对应关系的触发词。
+       如果不包含，则认为是 LLM 幻觉，丢弃该条。
     """
     result: List[dict] = []
     for t in triples:
         head = str(t.get("head", "") or "").strip()
         tail = str(t.get("tail", "") or "").strip()
         if not head or not tail:
-            # 头或尾为空，不入库
             continue
+
+        relation = str(t.get("relation", "") or "").strip()
+        evidence = str(t.get("evidence") or "").strip()
+
+        # 方案2：检查 evidence 是否包含对应关系的触发词
+        if relation_triggers_map and relation in relation_triggers_map:
+            triggers = relation_triggers_map[relation]
+            # 检查 evidence 中是否包含至少一个触发词（忽略大小写）
+            evidence_lower = evidence.lower()
+            has_trigger = any(
+                trigger.lower() in evidence_lower for trigger in triggers
+            )
+            if not has_trigger:
+                logger.warning(
+                    "过滤掉疑似幻觉三元组: relation=%s, evidence='%s'...', "
+                    "未找到触发词 %s",
+                    relation,
+                    evidence[:50] if evidence else "",
+                    triggers,
+                )
+                continue
+
         result.append(
             {
                 "head": head,
                 "head_type": (t.get("head_type") or "") or None,
-                "relation": str(t.get("relation", "") or "").strip(),
+                "relation": relation,
                 "tail": tail,
                 "tail_type": (t.get("tail_type") or "") or None,
-                "evidence": (t.get("evidence") or "") or None,
+                "evidence": evidence or None,
             }
         )
     return result
@@ -266,7 +311,10 @@ def extract_kg_for_contract(
     user_prompt = build_user_prompt(contract_text, template_desc, contract_type)
     raw_output = call_llm_for_triples(client, user_prompt)
     triples_raw = parse_llm_triples(raw_output)
-    triples_clean = filter_valid_triples(triples_raw)
+
+    # 构建关系触发词映射，用于后处理过滤幻觉
+    relation_triggers_map = build_relation_triggers_map(template)
+    triples_clean = filter_valid_triples(triples_raw, relation_triggers_map)
 
     # 5) 清空旧的，再写入新的
     db.query(models.KnowledgeTriple).filter(

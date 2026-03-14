@@ -14,7 +14,6 @@ import {
   Spin,
   message,
   List,
-  Divider,
   Collapse,
 } from 'antd'
 import {
@@ -27,6 +26,7 @@ import {
   ReloadOutlined,
   CompressOutlined,
   WarningOutlined,
+  ExclamationCircleOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../hooks/useAuth'
@@ -73,7 +73,76 @@ const changeTypeLabel = {
   alter: '修改',
 }
 
-// 解析全文为条款数组，标记有差异的条款（与 ContractCompareNew 一致）
+const importanceLabel = {
+  normal: '一般',
+  vital: '重要',
+}
+
+// 将 clause_marker 转为正则模式数组，用于匹配原文
+const getMarkerPatterns = (marker) => {
+  const patterns = []
+  if (!marker) return patterns
+
+  // 处理纯数字形式如 "1", "1.1", "3.3"
+  if (/^\d+(\.\d+)*$/.test(marker)) {
+    // 匹配 "第1条", "第1.1条", "第3.3条"
+    patterns.push(new RegExp(`^第${marker}条`, 'gm'))
+    // 匹配 "1.", "1.1.", "3.3."
+    patterns.push(new RegExp(`^${marker}\\.`, 'gm'))
+    // 匹配 "1、", "1.1、"
+    patterns.push(new RegExp(`^${marker}、`, 'gm'))
+  }
+
+  // 处理前言形式如 "a1"
+  if (/^a\d+$/.test(marker)) {
+    patterns.push(new RegExp(`^${marker}[\\s\\S]*?`, 'gm'))
+  }
+
+  return patterns
+}
+
+// 在原文文本中查找条款内容，返回起始和结束位置
+const findClauseInText = (fullText, marker) => {
+  const patterns = getMarkerPatterns(marker)
+  const lines = fullText.split('\n')
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+
+    for (const pattern of patterns) {
+      // 重置 lastIndex
+      pattern.lastIndex = 0
+      if (pattern.test(line)) {
+        // 找到条款，从这一行开始，直到下一个条款或文件结束
+        let clauseLines = [lines[i]]
+        let j = i + 1
+
+        // 继续读取后续行，直到遇到下一个条款编号
+        while (j < lines.length) {
+          const nextLine = lines[j].trim()
+          // 检查是否是条款编号（新条款的开始）
+          const isClauseStart = /^(第[一二三四五六七八九十百千万〇零两\d]+条|[\一二三四五六七八九十]+、|\d+\.\d+|\d+\.|（[一二三四五六七八九十]+）|\d+、|（\d+）|[a-zA-Z][\.\)、)])/.test(nextLine)
+          if (isClauseStart && nextLine.length < 50) {
+            break
+          }
+          clauseLines.push(lines[j])
+          j++
+        }
+
+        return {
+          startLine: i,
+          endLine: j - 1,
+          text: clauseLines.join('\n'),
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+// 解析全文为条款数组，标记有差异的条款
 const parseClausesWithDiff = (fullText, diffs) => {
   if (!fullText) return []
 
@@ -81,18 +150,22 @@ const parseClausesWithDiff = (fullText, diffs) => {
   const clauses = []
   let currentClause = null
 
+  // 构建差异查找表
   const diffMap = {}
   ;(diffs || []).forEach((d) => {
     diffMap[d.clause_marker] = d
   })
 
+  // 条款编号正则
   const clausePattern = /^(第[一二三四五六七八九十百千万〇零两\d]+条|[\一二三四五六七八九十]+、|\d+\.\d+|\d+\.|（[一二三四五六七八九十]+）|\d+、|（\d+）|[a-zA-Z][\.\)、)])(.*)/
 
+  // 查找匹配的差异（通过文本相似度）
   const findMatchingDiff = (text) => {
     if (!text) return null
     for (const d of diffs || []) {
       const leftText = d.left_text || ''
       const rightText = d.right_text || ''
+      // 如果文本中有超过 50% 的内容匹配，则认为是同一个条款
       if (leftText && text.includes(leftText.substring(0, Math.min(30, leftText.length)))) {
         return d
       }
@@ -107,6 +180,7 @@ const parseClausesWithDiff = (fullText, diffs) => {
     const line = lines[i]
     const trimmed = line.trim()
 
+    // 跳过空行
     if (!trimmed) {
       if (currentClause) {
         currentClause.content += '\n'
@@ -117,12 +191,17 @@ const parseClausesWithDiff = (fullText, diffs) => {
     const match = clausePattern.exec(trimmed)
 
     if (match) {
+      // 保存之前的条款
       if (currentClause) {
         clauses.push(currentClause)
       }
 
+      // 提取 clause_marker
       const markerStr = match[1]
       let normalizedMarker = ''
+
+      // 转换为统一格式
+      const cnToNum = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' }
       const numMatch = markerStr.match(/\d+/g)
       if (numMatch) {
         normalizedMarker = numMatch.join('.')
@@ -132,6 +211,8 @@ const parseClausesWithDiff = (fullText, diffs) => {
 
       const restContent = match[2] || ''
       const fullContent = restContent ? `${restContent}` : ''
+
+      // 优先用 clause_marker 匹配，其次用文本相似度
       const diff = diffMap[normalizedMarker] || findMatchingDiff(fullContent)
 
       currentClause = {
@@ -142,9 +223,11 @@ const parseClausesWithDiff = (fullText, diffs) => {
         diff: diff || null,
       }
     } else {
+      // 续行内容
       if (currentClause) {
         currentClause.content += (currentClause.content ? '\n' : '') + line
       } else {
+        // 前言部分：检查是否匹配差异
         const matchedDiff = findMatchingDiff(line) || findMatchingDiff(lines.slice(i, i + 5).join('\n'))
         currentClause = {
           marker: '',
@@ -157,6 +240,7 @@ const parseClausesWithDiff = (fullText, diffs) => {
     }
   }
 
+  // 保存最后一个条款
   if (currentClause) {
     clauses.push(currentClause)
   }
@@ -164,12 +248,7 @@ const parseClausesWithDiff = (fullText, diffs) => {
   return clauses
 }
 
-const importanceLabel = {
-  normal: '一般',
-  vital: '重要',
-}
-
-const ContractCompare = () => {
+const ContractCompareNew = () => {
   const navigate = useNavigate()
   const { user, logout, isAuthenticated, loading } = useAuth()
 
@@ -191,11 +270,11 @@ const ContractCompare = () => {
   const [compareDetail, setCompareDetail] = useState(null)
   const [compareLoading, setCompareLoading] = useState(false)
 
-  // 是否显示上传区域（对比后隐藏，显示概览）
-  const [showUploadArea, setShowUploadArea] = useState(true)
-
-  // 鼠标悬停的差异条款（用于原文高亮）
+  // 鼠标悬停的差异条款
   const [hoveredDiff, setHoveredDiff] = useState(null)
+
+  // 是否显示上传区域（从历史记录加载后隐藏上传区域）
+  const [showUploadArea, setShowUploadArea] = useState(true)
 
   useEffect(() => {
     if (loading) return
@@ -215,7 +294,6 @@ const ContractCompare = () => {
       const detail = error.response?.data?.detail
       console.error('获取对比历史失败 detail:', detail, 'raw error:', error)
       let msg = '获取对比历史失败'
-      // FastAPI/Pydantic 422 通常是一个包含 {type, loc, msg, input, url} 的数组
       if (Array.isArray(detail)) {
         msg = detail.map((d) => d.msg || JSON.stringify(d)).join('; ')
       } else if (typeof detail === 'string') {
@@ -261,7 +339,6 @@ const ContractCompare = () => {
 
     try {
       const contract = await contractService.uploadContract(file)
-      // 上传返回的结构中包含 id，再去拉一次详情以便拿到 file_content
       if (contract?.id) {
         if (side === 'left') {
           setLeftLoadingDetail(true)
@@ -270,7 +347,6 @@ const ContractCompare = () => {
         }
         const detail = await contractService.getContract(contract.id)
 
-        // 触发一次知识图谱抽取（失败不影响主流程）
         if (detail?.id) {
           try {
             await contractService.extractContractKG(detail.id)
@@ -301,7 +377,6 @@ const ContractCompare = () => {
       }
     }
 
-    // 阻止默认上传行为
     return Upload.LIST_IGNORE
   }
 
@@ -321,9 +396,7 @@ const ContractCompare = () => {
       const detail = await compareService.createCompare(leftContract.id, rightContract.id)
       setCompareDetail(detail)
       setSelectedHistoryId(detail.id)
-      setShowUploadArea(false) // 隐藏上传区域，显示概览
       message.success('合同对比完成')
-      // 对比完成后刷新历史列表
       loadHistory()
     } catch (error) {
       console.error('合同对比失败:', error)
@@ -336,7 +409,7 @@ const ContractCompare = () => {
   const loadCompareFromHistory = async (item) => {
     if (!item?.id) return
     setSelectedHistoryId(item.id)
-    setShowUploadArea(false) // 隐藏上传区域，显示概览
+    setShowUploadArea(false) // 从历史记录加载后隐藏上传区域
     setCompareLoading(true)
     setLeftLoadingDetail(true)
     setRightLoadingDetail(true)
@@ -344,7 +417,6 @@ const ContractCompare = () => {
       const detail = await compareService.getCompareDetail(item.id)
       setCompareDetail(detail)
 
-      // 同步加载左右合同详情用于预览
       if (detail.left_contract_id) {
         try {
           const left = await contractService.getContract(detail.left_contract_id)
@@ -382,6 +454,7 @@ const ContractCompare = () => {
   const currentResult = compareDetail?.result || null
   const allDiffs = currentResult?.all_differences || []
 
+  // 解析原文为条款
   const leftClauses = useMemo(() => {
     return parseClausesWithDiff(leftContract?.file_content, allDiffs)
   }, [leftContract?.file_content, allDiffs])
@@ -390,7 +463,7 @@ const ContractCompare = () => {
     return parseClausesWithDiff(rightContract?.file_content, allDiffs)
   }, [rightContract?.file_content, allDiffs])
 
-  const renderContractPanel = (side, contract, uploading, loadingDetail, fillHeight = false) => {
+  const renderContractPanel = (side, contract, uploading, loadingDetail) => {
     const isLeft = side === 'left'
     const title = isLeft ? '左侧合同' : '右侧合同'
     const color = isLeft ? 'blue' : 'green'
@@ -421,8 +494,8 @@ const ContractCompare = () => {
             )}
           </Space>
         }
-        style={fillHeight ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : { marginBottom: 16 }}
-        bodyStyle={fillHeight ? { flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, overflow: 'auto' } : { display: 'flex', flexDirection: 'column', gap: 8 }}
+        style={{ marginBottom: 16 }}
+        bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 8 }}
       >
         <Spin spinning={uploading || loadingDetail}>
           {!contract ? (
@@ -471,6 +544,7 @@ const ContractCompare = () => {
     )
   }
 
+  // 概览统计
   const renderSummary = () => {
     if (!currentResult) {
       return (
@@ -485,25 +559,25 @@ const ContractCompare = () => {
       <Space size="large" wrap>
         <span>
           <Tag color="blue">仅左侧存在</Tag>
-          <Text>{s.only_in_left_count ?? 0} 条</Text>
+          <Text strong>{s.only_in_left_count ?? 0} 条</Text>
         </span>
         <span>
           <Tag color="green">仅右侧存在</Tag>
-          <Text>{s.only_in_right_count ?? 0} 条</Text>
+          <Text strong>{s.only_in_right_count ?? 0} 条</Text>
         </span>
         <span>
           <Tag color="gold">两侧均存在</Tag>
-          <Text>{s.in_both_count ?? 0} 条</Text>
+          <Text strong>{s.in_both_count ?? 0} 条</Text>
         </span>
         <span>
           <Tag color="orange">内容有差异</Tag>
-          <Text>{s.changed_in_both_count ?? 0} 条</Text>
+          <Text strong>{s.changed_in_both_count ?? 0} 条</Text>
         </span>
       </Space>
     )
   }
 
-  // 渲染单个差异条款（原文中的显示，与 ContractCompareNew 一致）
+  // 渲染单个差异条款（在原文中的显示）
   const renderDiffClause = (clause, side, colors) => {
     const { diff, content, clause_marker } = clause
 
@@ -526,6 +600,21 @@ const ContractCompare = () => {
     const showLeftText = isLeft && (diff.change_type === 'delete' || diff.change_type === 'alter')
     const showRightText = !isLeft && (diff.change_type === 'add' || diff.change_type === 'alter')
 
+    // 风险提示内容
+    const riskContent = (
+      <div style={{ maxWidth: 400, padding: 4 }}>
+        <div style={{ marginBottom: 8 }}>
+          <Tag color={diff.importance === 'vital' ? 'red' : 'blue'}>
+            {importanceLabel[diff.importance] || diff.importance}
+          </Tag>
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+          <strong>风险说明：</strong>
+          {diff.explanation || '暂无详细说明'}
+        </div>
+      </div>
+    )
+
     return (
       <div
         style={{
@@ -535,6 +624,7 @@ const ContractCompare = () => {
         onMouseEnter={() => setHoveredDiff({ clause_marker, side })}
         onMouseLeave={() => setHoveredDiff(null)}
       >
+        {/* 差异标注行 */}
         <div
           style={{
             padding: '4px 12px',
@@ -555,6 +645,8 @@ const ContractCompare = () => {
             {clause_marker || diff.clause_marker}
           </Text>
         </div>
+
+        {/* 条款内容 */}
         <div
           style={{
             padding: '8px 12px',
@@ -565,7 +657,9 @@ const ContractCompare = () => {
         >
           {showLeftText && (
             <div>
-              <Text type="secondary" style={{ fontSize: 11 }}>左侧：</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                左侧：
+              </Text>
               <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 4 }}>
                 {diff.left_text || '（该条款在左侧合同中不存在）'}
               </div>
@@ -573,22 +667,28 @@ const ContractCompare = () => {
           )}
           {showRightText && (
             <div>
-              <Text type="secondary" style={{ fontSize: 11 }}>右侧：</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                右侧：
+              </Text>
               <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 4 }}>
                 {diff.right_text || '（该条款在右侧合同中不存在）'}
               </div>
             </div>
           )}
           {!showLeftText && !showRightText && (
-            <Text style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</Text>
+            <Text style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {content}
+            </Text>
           )}
         </div>
+
+        {/* 悬停显示的风险提示 */}
         {hoveredDiff?.clause_marker === clause_marker && hoveredDiff?.side === side && (
           <div
             style={{
               padding: '8px 12px',
               backgroundColor: '#fff2e8',
-              borderTop: '1px solid #ffbb96',
+              borderTop: `1px solid #ffbb96`,
               display: 'flex',
               alignItems: 'flex-start',
               gap: 8,
@@ -596,7 +696,9 @@ const ContractCompare = () => {
           >
             <WarningOutlined style={{ color: '#fa541c', marginTop: 4 }} />
             <div style={{ flex: 1 }}>
-              <Text strong style={{ color: '#ad2800', fontSize: 12 }}>风险解析</Text>
+              <Text strong style={{ color: '#ad2800', fontSize: 12 }}>
+                风险解析
+              </Text>
               <div style={{ fontSize: 12, lineHeight: 1.6, marginTop: 4, color: '#595959' }}>
                 {diff.explanation || '暂无详细说明'}
               </div>
@@ -607,7 +709,7 @@ const ContractCompare = () => {
     )
   }
 
-  // 原文对照视图（左右合同原文并排，与 ContractCompareNew 一致）
+  // 渲染原文对照视图
   const renderDiffView = () => {
     if (!currentResult) {
       return (
@@ -621,64 +723,76 @@ const ContractCompare = () => {
 
     return (
       <Row gutter={16}>
+        {/* 左侧原文 */}
         <Col span={12}>
           <Card
             title={
               <Space>
                 <FileTextOutlined />
                 <span>左侧合同原文</span>
-                {leftContract?.filename && <Tag color="blue">{leftContract.filename}</Tag>}
+                {leftContract?.filename && (
+                  <Tag color="blue">{leftContract.filename}</Tag>
+                )}
               </Space>
             }
             bodyStyle={{ padding: 0 }}
             style={{ marginBottom: 16 }}
           >
             {leftClauses.length > 0 ? (
-              leftClauses.map((clause, idx) => {
-                const diff = clause.diff
-                const colors = diff ? getDiffColors(diff.change_type, diff.importance) : null
-                return (
-                  <div key={idx}>
-                    {renderDiffClause(clause, 'left', colors)}
-                  </div>
-                )
-              })
-            ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无合同内容</div>
-            )}
+                leftClauses.map((clause, idx) => {
+                  const diff = clause.diff
+                  const colors = diff ? getDiffColors(diff.change_type, diff.importance) : null
+                  return (
+                    <div key={idx}>
+                      {renderDiffClause(clause, 'left', colors)}
+                    </div>
+                  )
+                })
+              ) : (
+                <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+                  暂无合同内容
+                </div>
+              )}
           </Card>
         </Col>
+
+        {/* 右侧原文 */}
         <Col span={12}>
           <Card
             title={
               <Space>
                 <FileTextOutlined />
                 <span>右侧合同原文</span>
-                {rightContract?.filename && <Tag color="green">{rightContract.filename}</Tag>}
+                {rightContract?.filename && (
+                  <Tag color="green">{rightContract.filename}</Tag>
+                )}
               </Space>
             }
             bodyStyle={{ padding: 0 }}
             style={{ marginBottom: 16 }}
           >
             {rightClauses.length > 0 ? (
-              rightClauses.map((clause, idx) => {
-                const diff = clause.diff
-                const colors = diff ? getDiffColors(diff.change_type, diff.importance) : null
-                return (
-                  <div key={idx}>
-                    {renderDiffClause(clause, 'right', colors)}
-                  </div>
-                )
-              })
-            ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无合同内容</div>
-            )}
+                rightClauses.map((clause, idx) => {
+                  const diff = clause.diff
+                  const colors = diff ? getDiffColors(diff.change_type, diff.importance) : null
+                  return (
+                    <div key={idx}>
+                      {renderDiffClause(clause, 'right', colors)}
+                    </div>
+                  )
+                })
+              ) : (
+                <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+                  暂无合同内容
+                </div>
+              )}
           </Card>
         </Col>
       </Row>
     )
   }
 
+  // 差异列表（可选展开）
   const renderDiffList = () => {
     if (!currentResult) return null
 
@@ -772,7 +886,9 @@ const ContractCompare = () => {
                                   fontSize: 13,
                                 }}
                               >
-                                <Text type="secondary" style={{ fontSize: 12 }}>左侧合同</Text>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  左侧合同
+                                </Text>
                                 <div>{item.left_text || '（该条款在左侧合同中不存在）'}</div>
                               </div>
                             </Tooltip>
@@ -794,7 +910,9 @@ const ContractCompare = () => {
                                   fontSize: 13,
                                 }}
                               >
-                                <Text type="secondary" style={{ fontSize: 12 }}>右侧合同</Text>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  右侧合同
+                                </Text>
                                 <div>{item.right_text || '（该条款在右侧合同中不存在）'}</div>
                               </div>
                             </Tooltip>
@@ -813,7 +931,7 @@ const ContractCompare = () => {
   }
 
   return (
-    <Layout style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <Layout style={{ minHeight: '100vh', overflow: 'auto' }}>
       <Header
         style={{
           background: '#fff',
@@ -832,7 +950,7 @@ const ContractCompare = () => {
             style={{ height: 36, verticalAlign: 'middle' }}
           />
           <Title level={3} style={{ margin: 0 }}>
-            合同智能解读系统 - 合同对比
+            合同智能解读系统 - 合同对比（新）
           </Title>
         </div>
         <Space>
@@ -853,16 +971,13 @@ const ContractCompare = () => {
         </Space>
       </Header>
 
-      <Content style={{ padding: '24px', background: '#f0f2f5', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <Row gutter={16} style={{ flex: 1, minHeight: 0, width: '100%' }}>
-          {/* 左侧：对比历史列表，可折叠，保留 maxHeight: 100% 内部滚动 */}
+      <Content style={{ padding: '24px', background: '#f0f2f5', flex: 1, overflow: 'auto' }}>
+        <Row gutter={16} style={{ width: '100%' }}>
+          {/* 左侧：对比历史列表，可折叠 */}
           <Col
             span={historyCollapsed ? 1 : 6}
             style={{
               transition: 'all 0.2s',
-              display: 'flex',
-              flexDirection: 'column',
-              height: '100%',
             }}
           >
             <Card
@@ -894,10 +1009,7 @@ const ContractCompare = () => {
               }
               bodyStyle={{
                 padding: historyCollapsed ? 4 : 8,
-                height: '100%',
-                overflow: 'hidden',
               }}
-              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
             >
               {historyCollapsed ? (
                 <div
@@ -926,7 +1038,6 @@ const ContractCompare = () => {
                       size="small"
                       dataSource={historyItems}
                       rowKey={(item) => item.id}
-                      style={{ maxHeight: '100%', overflowY: 'auto' }}
                       renderItem={(item) => {
                         const isActive = selectedHistoryId === item.id
                         const leftName =
@@ -998,47 +1109,21 @@ const ContractCompare = () => {
           {/* 右侧：左右合同 + 对比结果 */}
           <Col
             span={historyCollapsed ? 23 : 18}
-            style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}
+            style={{ gap: 12 }}
           >
-            {/* 上传界面：两个上传区域铺满 + 开始对比按钮 */}
+            {/* 上半部分：左右两份合同的上传 + 预览（根据 showUploadArea 显示/隐藏） */}
             {showUploadArea ? (
-              <>
-                <Row gutter={12} style={{ flex: 1, minHeight: 0 }}>
-                  <Col span={12} style={{ height: '100%' }}>{renderContractPanel('left', leftContract, leftUploading, leftLoadingDetail, true)}</Col>
-                  <Col span={12} style={{ height: '100%' }}>{renderContractPanel('right', rightContract, rightUploading, rightLoadingDetail, true)}</Col>
-                </Row>
-
-                <div
-                  style={{
-                    flexShrink: 0,
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    padding: '16px 0',
-                  }}
-                >
-                  <Button
-                    type="primary"
-                    size="large"
-                    onClick={handleStartCompare}
-                    disabled={!canStartCompare}
-                    loading={compareLoading}
-                  >
-                    开始对比
-                  </Button>
-                </div>
-              </>
+              <Row gutter={12} style={{ flex: '0 0 320px' }}>
+                <Col span={12}>{renderContractPanel('left', leftContract, leftUploading, leftLoadingDetail)}</Col>
+                <Col span={12}>{renderContractPanel('right', rightContract, rightUploading, rightLoadingDetail)}</Col>
+              </Row>
             ) : (
-              /* 概览：文件名 + 返回上传界面 + 重新上传/重新对比 */
-              <Row gutter={12} style={{ flexShrink: 0, marginBottom: 8 }}>
+              <Row gutter={12} style={{ flex: '0 0 auto', marginBottom: 8 }}>
                 <Col span={24}>
                   <Card size="small" bodyStyle={{ padding: 12 }}>
-                    <Space size="middle" wrap>
+                    <Space size="middle">
                       <Tag color="blue">左侧: {leftContract?.filename || '未知文件'}</Tag>
                       <Tag color="green">右侧: {rightContract?.filename || '未知文件'}</Tag>
-                      <Button type="primary" ghost onClick={() => setShowUploadArea(true)}>
-                        返回上传界面
-                      </Button>
                       <Button size="small" onClick={() => setShowUploadArea(true)}>
                         重新上传
                       </Button>
@@ -1057,28 +1142,32 @@ const ContractCompare = () => {
               </Row>
             )}
 
-            {/* 下半部分：对比结果（仅在非上传模式时显示），含原文对照与差异列表，样式与 ContractCompareNew 一致 */}
-            {!showUploadArea && (
-              <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-                <Card
-                  title={
-                    <Space>
-                      <FileTextOutlined />
-                      <span>对比结果</span>
-                    </Space>
-                  }
-                  bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
-                  style={{ marginBottom: 16 }}
-                >
-                  <Spin spinning={compareLoading}>
-                    <div style={{ marginBottom: 8 }}>{renderSummary()}</div>
-                    <Divider style={{ margin: '8px 0' }} />
-                    {renderDiffView()}
-                    {renderDiffList()}
-                  </Spin>
-                </Card>
-              </div>
-            )}
+            {/* 开始对比按钮（仅在上传区域显示时） */}
+
+            {/* 下半部分：对比结果 */}
+            <Card
+              title={
+                <Space>
+                  <FileTextOutlined />
+                  <span>对比结果</span>
+                </Space>
+              }
+              bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}
+              style={{ flex: 1, minHeight: 300, display: 'flex', flexDirection: 'column' }}
+            >
+              <Spin spinning={compareLoading}>
+                {/* 概览统计 */}
+                <div style={{ marginBottom: 8 }}>{renderSummary()}</div>
+
+                {/* 原文对照视图 */}
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  {renderDiffView()}
+                </div>
+
+                {/* 可展开的差异详情列表 */}
+                {renderDiffList()}
+              </Spin>
+            </Card>
           </Col>
         </Row>
       </Content>
@@ -1086,7 +1175,4 @@ const ContractCompare = () => {
   )
 }
 
-export default ContractCompare
-
-
-
+export default ContractCompareNew

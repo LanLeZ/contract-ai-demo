@@ -28,7 +28,8 @@ import {
   InboxOutlined,
   LogoutOutlined,
   HomeOutlined,
-  ArrowLeftOutlined
+  ArrowLeftOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../hooks/useAuth'
 import { contractService } from '../services/contracts'
@@ -611,6 +612,24 @@ const Contracts = () => {
     }
   }
 
+  // 刷新（重新抽取）知识图谱
+  const refreshKG = async () => {
+    if (!contractDetail?.id) return
+    setKgLoading(true)
+    setKgError(null)
+    try {
+      const res = await contractService.extractContractKG(contractDetail.id)
+      setKgTriples(res.triples || [])
+      message.success('知识图谱刷新成功！')
+    } catch (error) {
+      console.error('刷新知识图谱失败:', error)
+      setKgError(error.response?.data?.detail || '刷新知识图谱失败')
+      message.error('刷新知识图谱失败')
+    } finally {
+      setKgLoading(false)
+    }
+  }
+
   const loadComplexityForContract = async (contractId, options = {}) => {
     if (!contractId) return
     setComplexityLoading(true)
@@ -772,25 +791,28 @@ const Contracts = () => {
       // 显示合同详情
       return (
         <Card
+          className="contract-detail-card"
           title={
             <Space>
               <Button
                 type="text"
                 icon={<ArrowLeftOutlined />}
                 onClick={handleBackToUpload}
-                style={{ marginLeft: -16 }}
+                style={{ marginLeft: -16, color: '#fff' }}
               >
                 返回
               </Button>
-              <span>{contractDetail.filename}</span>
+              <span style={{ color: '#fff' }}>{contractDetail.filename}</span>
             </Space>
           }
+          headStyle={{ background: '#1677FF', color: '#fff', padding: '10px 16px', borderBottom: 'none' }}
           style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{ flex: 1, overflow: 'auto' }}
+          bodyStyle={{ flex: 1, overflow: 'hidden', padding: '12px', display: 'flex', flexDirection: 'column', minHeight: 0 }}
         >
           <Spin spinning={loadingDetail}>
             <Tabs
               activeKey={activeTab}
+              style={{ marginTop: -4, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
               onChange={(key) => {
                 setActiveTab(key)
                 if (key === 'kg' && contractDetail?.id) {
@@ -809,12 +831,12 @@ const Contracts = () => {
                   children: (
                     <div>
                       {/* 文件内容预览 - 只显示合同文本内容 */}
-                      <Card title="文件内容" style={{ marginTop: 16 }}>
+                      <Card title="文件内容" style={{ marginTop: 6 }}>
                         <div
                           style={{
                             maxHeight: '500px',
                             overflow: 'auto',
-                            padding: '16px',
+                            padding: '6px',
                             background: '#fafafa',
                             border: '1px solid #d9d9d9',
                             borderRadius: '4px',
@@ -949,168 +971,172 @@ const Contracts = () => {
                   key: 'qa',
                   label: '智能问答',
                   children: (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                      <Row gutter={16}>
-                        {/* 左侧：会话列表 */}
-                        <Col span={8}>
-                          <Card
-                            title="历史会话"
-                            extra={
+                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                      {/* 上半部分：会话列表 + 当前会话 */}
+                      <div style={{ flex: 1, minHeight: 0 }}>
+                        <Row gutter={12} style={{ height: '100%' }}>
+                          {/* 左侧：会话列表 */}
+                          <Col span={8} style={{ height: '100%' }}>
+                            <Card
+                              title="历史会话"
+                              extra={
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  onClick={() => loadSessions(contractDetail.id)}
+                                  loading={qaSessionsLoading}
+                                >
+                                  刷新
+                                </Button>
+                              }
+                              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+                              bodyStyle={{ padding: 8, flex: 1, minHeight: 0, overflowY: 'auto' }}
+                            >
                               <Button
-                                type="link"
-                                size="small"
-                                onClick={() => loadSessions(contractDetail.id)}
-                                loading={qaSessionsLoading}
+                                type="dashed"
+                                block
+                                style={{ marginBottom: 8 }}
+                                onClick={() => {
+                                  setQaMessages([])
+                                  setQaSessionId(null)
+                                  setQaActiveSessionId(null)
+                                }}
                               >
-                                刷新
+                                新建会话
                               </Button>
-                            }
-                            bodyStyle={{ padding: 8, maxHeight: 360, overflowY: 'auto' }}
-                          >
-                            <Button
-                              type="dashed"
-                              block
-                              style={{ marginBottom: 8 }}
-                              onClick={() => {
-                                // 新建会话：清空对话内容 & 当前会话 ID
-                                setQaMessages([])
-                                setQaSessionId(null)
-                                setQaActiveSessionId(null)
+                              {qaSessionsLoading ? (
+                                <div style={{ textAlign: 'center', padding: 16 }}>
+                                  <Spin size="small" />
+                                </div>
+                              ) : qaSessions.length === 0 ? (
+                                <Text type="secondary">暂无历史会话</Text>
+                              ) : (
+                                <Space direction="vertical" style={{ width: '100%' }}>
+                                  {qaSessions.map((s) => (
+                                    <Card
+                                      key={s.session_id}
+                                      size="small"
+                                      hoverable
+                                      onClick={() => handleLoadSessionHistory(s.session_id)}
+                                      style={{
+                                        borderColor:
+                                          qaActiveSessionId === s.session_id ? '#1890ff' : undefined,
+                                      }}
+                                    >
+                                      <Space direction="vertical" size={4}>
+                                        <Text strong ellipsis style={{ maxWidth: '100%' }}>
+                                          {s.last_question || '（无问题内容）'}
+                                        </Text>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>
+                                          {s.last_time
+                                            ? new Date(s.last_time).toLocaleString('zh-CN')
+                                            : ''}
+                                        </Text>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>
+                                          {`轮数：${s.message_count}`}
+                                        </Text>
+                                      </Space>
+                                    </Card>
+                                  ))}
+                                </Space>
+                              )}
+                            </Card>
+                          </Col>
+
+                          {/* 右侧：当前会话对话区 */}
+                          <Col span={16} style={{ height: '100%' }}>
+                            <Card
+                              title={
+                                qaActiveSessionId
+                                  ? `当前会话（ID: ${qaActiveSessionId.slice(0, 8)}...）`
+                                  : '当前会话'
+                              }
+                              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+                              bodyStyle={{
+                                padding: 16,
+                                flex: 1,
+                                minHeight: 0,
+                                overflowY: 'auto',
+                                background: '#fafafa',
                               }}
                             >
-                              新建会话
-                            </Button>
-                            {qaSessionsLoading ? (
-                              <div style={{ textAlign: 'center', padding: 16 }}>
-                                <Spin size="small" />
-                              </div>
-                            ) : qaSessions.length === 0 ? (
-                              <Text type="secondary">暂无历史会话</Text>
-                            ) : (
-                              <Space direction="vertical" style={{ width: '100%' }}>
-                                {qaSessions.map((s) => (
-                                  <Card
-                                    key={s.session_id}
-                                    size="small"
-                                    hoverable
-                                    onClick={() => handleLoadSessionHistory(s.session_id)}
-                                    style={{
-                                      borderColor:
-                                        qaActiveSessionId === s.session_id ? '#1890ff' : undefined,
-                                    }}
-                                  >
-                                    <Space direction="vertical" size={4}>
-                                      <Text strong ellipsis style={{ maxWidth: '100%' }}>
-                                        {s.last_question || '（无问题内容）'}
-                                      </Text>
-                                      <Text type="secondary" style={{ fontSize: 12 }}>
-                                        {s.last_time
-                                          ? new Date(s.last_time).toLocaleString('zh-CN')
-                                          : ''}
-                                      </Text>
-                                      <Text type="secondary" style={{ fontSize: 12 }}>
-                                        {`轮数：${s.message_count}`}
-                                      </Text>
-                                    </Space>
-                                  </Card>
-                                ))}
-                              </Space>
-                            )}
-                          </Card>
-                        </Col>
-
-                        {/* 右侧：当前会话对话区 */}
-                        <Col span={16}>
-                          <Card
-                            title={
-                              qaActiveSessionId
-                                ? `当前会话（ID: ${qaActiveSessionId.slice(0, 8)}...）`
-                                : '当前会话'
-                            }
-                            bodyStyle={{
-                              padding: 16,
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 8,
-                              maxHeight: 360,
-                              overflowY: 'auto',
-                              background: '#fafafa',
-                            }}
-                          >
-                            {(qaHistoryLoading || qaLoading) && (
-                              <div style={{ textAlign: 'center', marginBottom: 8 }}>
-                                <Spin size="small" />
-                              </div>
-                            )}
-                            {qaMessages.length === 0 ? (
-                              <div style={{ textAlign: 'center', color: '#999' }}>
-                                暂无对话，输入问题开始咨询本合同相关内容。
-                              </div>
-                            ) : (
-                              qaMessages.map((msg, index) => (
-                                <div
-                                  key={index}
-                                  style={{
-                                    display: 'flex',
-                                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      maxWidth: '80%',
-                                      padding: '8px 12px',
-                                      borderRadius: 8,
-                                      background:
-                                        msg.role === 'user' ? '#e6f7ff' : '#f6ffed',
-                                      border:
-                                        msg.role === 'user'
-                                          ? '1px solid #91d5ff'
-                                          : '1px solid #b7eb8f',
-                                      whiteSpace: 'pre-wrap',
-                                      wordBreak: 'break-word',
-                                      fontSize: 14,
-                                      lineHeight: 1.7,
-                                    }}
-                                  >
-                                    {msg.content}
-                                  </div>
+                              {(qaHistoryLoading || qaLoading) && (
+                                <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                                  <Spin size="small" />
                                 </div>
-                              ))
-                            )}
-                          </Card>
-                        </Col>
-                      </Row>
+                              )}
+                              {qaMessages.length === 0 ? (
+                                <div style={{ textAlign: 'center', color: '#999' }}>
+                                  暂无对话，输入问题开始咨询本合同相关内容。
+                                </div>
+                              ) : (
+                                qaMessages.map((msg, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        maxWidth: '80%',
+                                        padding: '8px 12px',
+                                        borderRadius: 8,
+                                        background:
+                                          msg.role === 'user' ? '#e6f7ff' : '#f6ffed',
+                                        border:
+                                          msg.role === 'user'
+                                            ? '1px solid #91d5ff'
+                                            : '1px solid #b7eb8f',
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word',
+                                        fontSize: 14,
+                                        lineHeight: 1.7,
+                                      }}
+                                    >
+                                      {msg.content}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </Card>
+                          </Col>
+                        </Row>
+                      </div>
 
                       {/* 输入区 */}
-                      <Card bodyStyle={{ padding: 16 }}>
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          <Input.TextArea
-                            rows={3}
-                            placeholder="请输入你想咨询的内容，例如：这份合同的违约责任有哪些？"
-                            value={qaInput}
-                            onChange={(e) => setQaInput(e.target.value)}
-                            disabled={qaLoading}
-                          />
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Text type="secondary">
-                              当前问答会自动归入上方选中的会话；如未选中，则自动创建新会话。
-                            </Text>
-                            <Button
-                              type="primary"
-                              onClick={handleSendQuestion}
-                              loading={qaLoading}
+                      <div style={{ flex: '0 0 auto' }}>
+                        <Card bodyStyle={{ padding: 12 }}>
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            <Input.TextArea
+                              rows={2}
+                              placeholder="请输入你想咨询的内容，例如：这份合同的违约责任有哪些？"
+                              value={qaInput}
+                              onChange={(e) => setQaInput(e.target.value)}
+                              disabled={qaLoading}
+                            />
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                              }}
                             >
-                              发送
-                            </Button>
-                          </div>
-                        </Space>
-                      </Card>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                自动归入选中会话，未选中则创建新会话
+                              </Text>
+                              <Button
+                                type="primary"
+                                onClick={handleSendQuestion}
+                                loading={qaLoading}
+                              >
+                                发送
+                              </Button>
+                            </div>
+                          </Space>
+                        </Card>
+                      </div>
                     </div>
                   ),
                 },
@@ -1119,6 +1145,18 @@ const Contracts = () => {
                   label: '知识图谱',
                   children: (
                     <div style={{ marginTop: 8 }}>
+                      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text type="secondary">实体关系三元组</Text>
+                        <Button
+                          type="text"
+                          icon={<SyncOutlined />}
+                          onClick={refreshKG}
+                          loading={kgLoading}
+                          title="刷新知识图谱"
+                        >
+                          刷新
+                        </Button>
+                      </div>
                       {renderKGForceGraph()}
                     </div>
                   ),
@@ -1170,12 +1208,16 @@ const Contracts = () => {
                 hoverable
                 size="small"
                 className="contract-intro-card"
-                style={{ height: '100%', cursor: 'pointer' }}
-                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                style={{ height: '100%', cursor: 'pointer', border: 'none' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', alignItems: 'center' }}
               >
-                <img src="/images/triples.png" alt="知识图谱" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
-                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>知识图谱</div>
-                <Text type="secondary" style={{ fontSize: 12 }}>实体关系抽取与可视化</Text>
+                <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 12 }}>
+                  <img src="/images/triples.png" alt="知识图谱" style={{ width: 130, height: 130, objectFit: 'contain', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 18 }}>知识图谱</div>
+                    <Text type="secondary" style={{ fontSize: 14 }}>实体关系三元组抽取与可视化</Text>
+                  </div>
+                </div>
               </Card>
             </Col>
             <Col span={8} style={{ height: '100%' }}>
@@ -1183,12 +1225,16 @@ const Contracts = () => {
                 hoverable
                 size="small"
                 className="contract-intro-card"
-                style={{ height: '100%', cursor: 'pointer' }}
-                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                style={{ height: '100%', cursor: 'pointer', border: 'none' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', alignItems: 'center' }}
               >
-                <img src="/images/qa.png" alt="智能问答" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
-                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>智能问答</div>
-                <Text type="secondary" style={{ fontSize: 12 }}>基于合同内容的问答</Text>
+                <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 12 }}>
+                  <img src="/images/qa.png" alt="智能问答" style={{ width: 130, height: 130, objectFit: 'contain', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 18 }}>智能问答</div>
+                    <Text type="secondary" style={{ fontSize: 14 }}>基于合同内容与法律条文的问答</Text>
+                  </div>
+                </div>
               </Card>
             </Col>
             <Col span={8} style={{ height: '100%' }}>
@@ -1196,12 +1242,16 @@ const Contracts = () => {
                 hoverable
                 size="small"
                 className="contract-intro-card"
-                style={{ height: '100%', cursor: 'pointer' }}
-                bodyStyle={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                style={{ height: '100%', cursor: 'pointer', border: 'none' }}
+                bodyStyle={{ padding: 12, height: '100%', display: 'flex', alignItems: 'center' }}
               >
-                <img src="/images/analyze.png" alt="长难句解析" style={{ width: '100%', maxWidth: 100, height: 80, objectFit: 'contain', flexShrink: 0 }} />
-                <div style={{ marginTop: 8, fontWeight: 500, fontSize: 14 }}>长难句解析</div>
-                <Text type="secondary" style={{ fontSize: 12 }}>条款复杂度分析与通俗化</Text>
+                <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 12 }}>
+                  <img src="/images/analyze.png" alt="长难句解析" style={{ width: 130, height: 130, objectFit: 'contain', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 18 }}>长难句解析</div>
+                    <Text type="secondary" style={{ fontSize: 14 }}>条款复杂度分析与通俗化</Text>
+                  </div>
+                </div>
               </Card>
             </Col>
           </Row>
@@ -1297,7 +1347,7 @@ const Contracts = () => {
           </Col>
 
           {/* 右侧：上传区域或合同详情 */}
-          <Col span={16}>
+          <Col span={16} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             {renderRightContent()}
           </Col>
         </Row>
